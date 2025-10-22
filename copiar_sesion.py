@@ -1,5 +1,6 @@
 # save_session.py
 from playwright.sync_api import sync_playwright
+from config import PAGE_URL, BROWSER_CONFIG
 
 def main():
     with sync_playwright() as p:
@@ -7,8 +8,8 @@ def main():
         context = browser.new_context()
         page = context.new_page()
 
-        # Cambia por la URL de login que uses
-        page.goto("https://correoweb.madrid.org/owa/#path=/mail")
+        # Navegar a la URL configurada
+        page.goto(PAGE_URL)
 
         print("Abre el navegador y realiza el login manualmente.")
         input("Cuando termines, presiona ENTER en esta terminal para guardar la sesión...")

@@ -1,3 +1,17 @@
+# Entorno virtual
 .venv/
+
+# Archivos de sesión y configuración sensible
 state.json
+config.yaml
+
+# Archivos de datos
 *.xlsx
+
+# Cache de Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Directorio de usuario de Chrome (Patchright)
+.chrome_user_data/
