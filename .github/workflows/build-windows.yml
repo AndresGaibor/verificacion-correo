@@ -85,7 +85,7 @@ jobs:
         shell: pwsh
         run: |
           Write-Host "Cache miss - Instalando navegadores Playwright..."
-          playwright install chromium
+          python -m playwright install chromium
 
       - name: Clean previous builds
         shell: pwsh
