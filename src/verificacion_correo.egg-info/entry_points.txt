@@ -1,0 +1,8 @@
+[console_scripts]
+vcorreo = verificacion_correo.cli.main:main
+verificacion-correo = verificacion_correo.cli.main:main
+verificacion-correo-gui = verificacion_correo.gui.main:main
+verificacion-correo-process = verificacion_correo.cli.main:main
+verificacion-correo-setup = verificacion_correo.cli.main:main
+verificacion-correo-status = verificacion_correo.cli.main:main
+verificacion-correo-validate = verificacion_correo.cli.main:main

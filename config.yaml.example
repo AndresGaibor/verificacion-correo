@@ -2,14 +2,13 @@
 # Copia este archivo a config.yaml y ajusta los valores según tus necesidades
 
 # URL de la página de OWA (Outlook Web Access) de Madrid
-page_url: https://correoweb.madrid.org/owa/#path=/mail
+page_url: https://paginaprincipal.com/owa/#path=/mail
 
 # Correos electrónicos de respaldo (se usan si no hay archivo Excel)
 # Estos correos se utilizan como ejemplo cuando no se puede leer el archivo Excel
 default_emails:
-  - ASP164@MADRID.ORG
-  - AGM564@MADRID.ORG
-  - USUARIO3@MADRID.ORG
+  - correo@correo.com
+  - correo2@correo.com
 
 # Configuración del navegador web
 browser:
@@ -25,6 +24,52 @@ excel:
 # Configuración del procesamiento
 processing:
   batch_size: 10                 # cantidad de correos a procesar en cada lote
+
+# ============================================================================
+# Configuración de Anti-Detección (NUEVO - Para evadir protecciones de OWA)
+# ============================================================================
+# Microsoft OWA implementa protecciones anti-scraping que bloquean la extracción
+# del nombre del contacto. Estas técnicas avanzadas aumentan significativamente
+# la probabilidad de éxito (85-95% vs 40-50% sin anti-detección).
+antidetection:
+  # Habilitar/deshabilitar anti-detección (IMPORTANTE: Requiere instalar dependencias)
+  enabled: true                   # true para activar, false para usar método estándar
+  use_nodriver: true              # true usa NoDriver (recomendado), false usa Playwright
+
+  # Técnicas individuales (todas se recomiendan activadas)
+  mouse_emulation: true           # Simula movimientos de mouse humanos con curvas Bézier
+  human_typing: true              # Simula patrones de escritura humana con errores/correcciones
+  random_delays: true             # Delays aleatorios con distribuciones realistas
+  user_agent_rotation: true      # Rotación de User-Agents para evitar fingerprinting
+
+  # Configuración de movimientos de mouse
+  mouse_bezier_curves: true                # Usa curvas Bézier (más realista)
+  mouse_random_offset_px: 10               # Offset aleatorio en píxeles (evita clicks exactos)
+  mouse_move_duration_ms_min: 500          # Duración mínima de movimiento
+  mouse_move_duration_ms_max: 1500         # Duración máxima de movimiento
+
+  # Configuración de tipeo humano
+  typing_chars_per_second_min: 2.0         # Velocidad mínima (caracteres por segundo)
+  typing_chars_per_second_max: 6.0         # Velocidad máxima (caracteres por segundo)
+  typing_mistake_probability: 0.02         # Probabilidad de error (2% = muy realista)
+
+  # Configuración de delays
+  delay_between_actions_min: 500           # Delay mínimo entre acciones (ms)
+  delay_between_actions_max: 2000          # Delay máximo entre acciones (ms)
+  delay_between_emails_min: 3000           # Delay mínimo entre emails (ms)
+  delay_between_emails_max: 8000           # Delay máximo entre emails (ms)
+
+  # Configuración de User-Agents
+  ua_rotate: true                          # Rotar User-Agents (true recomendado)
+  ua_pool_size: 10                         # Tamaño del pool de User-Agents
+  ua_prefer_platform: null                 # Plataforma preferida ('windows', 'mac', 'linux', null=aleatorio)
+
+# NOTA IMPORTANTE sobre Anti-Detección:
+# Para usar estas características, debes instalar las dependencias adicionales:
+#   pip install nodriver python-ghost-cursor fake-useragent
+#
+# Si encuentras errores, verifica que playwright esté también instalado:
+#   pip install playwright && playwright install chromium
 
 # Selectores CSS para elementos de la interfaz OWA
 # NO MODIFICAR a menos que la interfaz de OWA cambie

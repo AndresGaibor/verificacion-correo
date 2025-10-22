@@ -53,15 +53,29 @@ class SessionManager:
         try:
             with sync_playwright() as p:
                 # Launch browser (visible for manual interaction)
-                browser = p.chromium.launch(headless=False)
-                context = browser.new_context()
+                browser = p.chromium.launch(
+                    headless=False,
+                    slow_mo=1000  # Slow down operations to give user time to interact
+                )
+                context = browser.new_context(
+                    viewport={'width': 1280, 'height': 720}
+                )
                 page = context.new_page()
 
                 # Navigate to OWA
                 page.goto(self.config.page_url)
 
                 logger.info("Browser opened. Please log in manually.")
-                input("When finished, press ENTER in this terminal to save the session...")
+                logger.info("The browser will stay open for 5 minutes to allow login...")
+                logger.info("You can close the browser when finished to save the session.")
+
+                # Wait for user to complete login or close browser
+                # We'll wait up to 5 minutes (300 seconds)
+                try:
+                    page.wait_for_timeout(300000)  # 5 minutes
+                except:
+                    # Browser was closed by user, which is expected
+                    pass
 
                 # Save session state
                 self._ensure_session_directory()
@@ -92,24 +106,85 @@ class SessionManager:
 
         try:
             if not self._playwright:
-                self._playwright = sync_playwright().start()
+                # Fix for asyncio event loop conflict when running in threads
+                import asyncio
+                import threading
+                import sys
 
-            # Launch browser with session
-            self._browser = self._playwright.chromium.launch(
-                headless=self.config.browser.headless
-            )
+                # Log thread and loop state for debugging
+                thread_id = threading.current_thread().ident
+                thread_name = threading.current_thread().name
+                logger.debug(f"Creating Playwright context in thread {thread_name} (ID: {thread_id})")
+
+                # Strategy 1: Set environment variable to force sync API
+                import os
+                os.environ['PLAYWRIGHT_PYTHON_SYNC_API_IN_THREAD'] = '1'
+                logger.debug("Set PLAYWRIGHT_PYTHON_SYNC_API_IN_THREAD=1")
+
+                # Strategy 2: Remove event loop for the duration of Playwright operations
+                old_loop = None
+                loop_was_running = False
+                try:
+                    old_loop = asyncio.get_event_loop()
+                    loop_was_running = old_loop.is_running() if old_loop else False
+                    logger.debug(f"Found existing event loop: {old_loop}, running: {loop_was_running}")
+                    asyncio.set_event_loop(None)
+                    logger.debug("Event loop temporarily removed")
+                except RuntimeError as e:
+                    logger.debug(f"No event loop in current thread: {e}")
+                    pass
+
+                try:
+                    logger.debug("Starting sync_playwright()...")
+                    self._playwright = sync_playwright().start()
+                    logger.debug("sync_playwright() started successfully")
+                except Exception as e:
+                    logger.error(f"Failed to start sync_playwright(): {e}", exc_info=True)
+                    raise
+
+            # Launch browser with session - keep event loop disabled
+            try:
+                logger.debug(f"Launching browser (headless={self.config.browser.headless})...")
+                self._browser = self._playwright.chromium.launch(
+                    headless=self.config.browser.headless
+                )
+                logger.debug("Browser launched successfully")
+            except Exception as e:
+                logger.error(f"Failed to launch browser: {e}", exc_info=True)
+                raise
 
             # Create context with saved session state
-            self._context = self._browser.new_context(
-                storage_state=str(self.session_file),
-                viewport={'width': 1280, 'height': 720}
-            )
+            try:
+                logger.debug(f"Creating browser context with session: {self.session_file}")
+                self._context = self._browser.new_context(
+                    storage_state=str(self.session_file),
+                    viewport={'width': 1280, 'height': 720}
+                )
+                logger.debug("Browser context created successfully")
+            except Exception as e:
+                logger.error(f"Failed to create browser context: {e}", exc_info=True)
+                raise
+
+            # Restore event loop only after all Playwright operations complete
+            if old_loop is not None:
+                asyncio.set_event_loop(old_loop)
+                logger.debug(f"Event loop restored: {old_loop}")
 
             logger.info(f"Browser context created with session: {self.session_file}")
             return self._context
 
         except Exception as e:
-            logger.error(f"Error creating automation context: {e}")
+            logger.error(f"Error creating automation context: {e}", exc_info=True)
+
+            # Restore loop even on error
+            try:
+                import asyncio
+                if 'old_loop' in locals() and old_loop is not None:
+                    asyncio.set_event_loop(old_loop)
+                    logger.debug("Event loop restored after error")
+            except:
+                pass
+
             self._cleanup()
             return None
 
@@ -150,12 +225,35 @@ class SessionManager:
                 return False
 
             page = context.new_page()
-            response = page.goto(self.config.page_url, timeout=10000)
+
+            # Use domcontentloaded instead of load (better for SPAs like OWA)
+            # Increased timeout from 10s to 30s to handle slow loading
+            response = page.goto(
+                self.config.page_url,
+                timeout=30000,
+                wait_until='domcontentloaded'
+            )
 
             # Check if we're still authenticated (not redirected to login)
-            is_valid = (response and response.status == 200 and
-                       page.url != self.config.page_url and
-                       'login' not in page.url.lower())
+            # Valid session: no redirect to login page, successful response
+            is_valid = (
+                response is not None and
+                'login' not in page.url.lower() and
+                'signin' not in page.url.lower()
+            )
+
+            # Additional validation: try to detect OWA interface element
+            if is_valid:
+                try:
+                    # Check for a known OWA element (e.g., new message button)
+                    page.wait_for_selector(
+                        self.config.selectors.new_message_btn,
+                        timeout=5000,
+                        state='attached'
+                    )
+                except:
+                    # Element not found, session might be invalid
+                    is_valid = False
 
             page.close()
             self._cleanup()
@@ -169,6 +267,7 @@ class SessionManager:
 
         except Exception as e:
             logger.warning(f"Session validation error: {e}")
+            self._cleanup()
             return False
 
     def get_session_info(self) -> Dict[str, Any]:

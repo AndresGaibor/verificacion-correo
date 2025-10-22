@@ -156,6 +156,169 @@ class ContactExtractor:
             logger.error(f"Error extracting popup text: {e}")
             return ""
 
+    def _extract_personal_email(self, popup: Locator) -> Optional[str]:
+        """
+        Extract the personal email address from the popup.
+
+        OWA shows multiple emails - we want the personal one (e.g., nombre.apellido@madrid.org)
+        NOT the token (e.g., AGM564@MADRID.ORG).
+
+        Args:
+            popup: Popup locator
+
+        Returns:
+            Personal email address or None
+        """
+        try:
+            # Find all email-like spans
+            email_elements = popup.locator('span[title*="@"]')
+            count = email_elements.count()
+
+            logger.debug(f"Found {count} potential email elements")
+
+            for i in range(count):
+                try:
+                    email = email_elements.nth(i).get_attribute('title')
+                    if not email:
+                        email = email_elements.nth(i).inner_text()
+
+                    email = email.strip()
+                    logger.debug(f"  Checking email candidate: {email}")
+
+                    # Skip if it's a generic token (AGM564@, ASP164@, etc.)
+                    if re.match(r'^(ASP|AGM|AEM|ADM)\d+@', email, re.I):
+                        logger.debug(f"    Skipping token email: {email}")
+                        continue
+
+                    # This looks like a personal email
+                    if '@' in email and '.' in email:
+                        logger.debug(f"    Found personal email: {email}")
+                        return email
+
+                except Exception as e:
+                    logger.debug(f"  Error checking email element {i}: {e}")
+                    continue
+
+        except Exception as e:
+            logger.debug(f"Error extracting personal email: {e}")
+
+        return None
+
+    def _extract_by_text_labels(self, popup: Locator) -> Dict[str, str]:
+        """
+        Extract contact data by finding stable text labels in the popup.
+
+        This method is more robust than CSS selectors because it relies on
+        visible text labels that don't change (e.g., "Departamento:", "Compañía:").
+
+        Args:
+            popup: Popup locator
+
+        Returns:
+            Dictionary of extracted field data
+        """
+        extracted = {}
+
+        try:
+            # Get all text content from popup for fallback parsing
+            popup_text = popup.inner_text()
+
+            # DEBUG: Log the popup text structure
+            logger.debug(f"Popup text structure (first 500 chars):\n{popup_text[:500]}")
+
+            # Strategy 1: Extract fields with clear "Label:" format
+            simple_fields = {
+                'department': ['Departamento:', 'Department:'],
+                'company': ['Compañía:', 'Company:'],
+                'office_location': ['Oficina:', 'Office:'],
+            }
+
+            for field, labels in simple_fields.items():
+                for label in labels:
+                    if label in popup_text:
+                        # Find the value after the label
+                        lines = popup_text.split('\n')
+                        for i, line in enumerate(lines):
+                            if label in line:
+                                # Value is typically on the same line or next line
+                                value = line.replace(label, '').strip()
+                                if not value and i + 1 < len(lines):
+                                    value = lines[i + 1].strip()
+
+                                if value and value.lower() not in ['directorio', 'directory']:
+                                    extracted[field] = value
+                                    logger.debug(f"Found {field} via label '{label}': {value}")
+                                    break
+                        if field in extracted:
+                            break
+
+            # Strategy 2: Extract phone (labeled as "Trabajo:")
+            phone_labels = ['Trabajo:', 'Work:']
+            for label in phone_labels:
+                if label in popup_text:
+                    lines = popup_text.split('\n')
+                    for i, line in enumerate(lines):
+                        if label in line:
+                            # Next line usually has the phone
+                            if i + 1 < len(lines):
+                                phone_value = lines[i + 1].strip()
+                                # Clean to digits only
+                                phone_clean = ''.join(c for c in phone_value if c.isdigit() or c in ['+', '-', ' ', '(', ')'])
+                                if phone_clean.strip():
+                                    extracted['phone'] = phone_clean.strip()
+                                    logger.debug(f"Found phone via label '{label}': {phone_clean.strip()}")
+                                    break
+                    if 'phone' in extracted:
+                        break
+
+            # Strategy 3: Extract SIP (labeled as "MI:")
+            sip_labels = ['MI:', 'IM:']
+            for label in sip_labels:
+                if label in popup_text:
+                    lines = popup_text.split('\n')
+                    for i, line in enumerate(lines):
+                        if label in line:
+                            # Next line has the SIP address
+                            if i + 1 < len(lines):
+                                sip_value = lines[i + 1].strip()
+                                if sip_value.startswith('sip:'):
+                                    extracted['sip'] = sip_value
+                                    logger.debug(f"Found SIP via label '{label}': {sip_value}")
+                                    break
+                    if 'sip' in extracted:
+                        break
+
+            # Strategy 4: Extract address (special handling for multiline)
+            address_labels = ['Dirección profesional', 'Business Address']
+            for label in address_labels:
+                if label in popup_text:
+                    lines = popup_text.split('\n')
+                    for i, line in enumerate(lines):
+                        if label in line:
+                            # Address is typically on next 2-3 lines
+                            address_parts = []
+                            for j in range(1, 4):  # Check next 3 lines
+                                if i + j < len(lines):
+                                    line_text = lines[i + j].strip()
+                                    # Stop at next section or empty line
+                                    if line_text and not any(x in line_text for x in ['Departamento', 'Compañía', 'Oficina', 'Trabajo', 'MI', 'Calendario']):
+                                        address_parts.append(line_text)
+                                    else:
+                                        break
+
+                            if address_parts:
+                                address = ' '.join(address_parts)
+                                extracted['address'] = address
+                                logger.debug(f"Found address via label '{label}': {address}")
+                                break
+                    if 'address' in extracted:
+                        break
+
+        except Exception as e:
+            logger.debug(f"Error in text label extraction: {e}")
+
+        return extracted
+
     def _extract_dom_based(self, popup: Locator) -> Optional[ContactInfo]:
         """
         Extract contact information using DOM selectors.
@@ -171,47 +334,69 @@ class ContactExtractor:
             ContactInfo object or None if extraction fails
         """
         try:
+            # DEBUG: Take screenshot of popup for analysis
+            try:
+                import os
+                from pathlib import Path
+                debug_dir = Path("debug_screenshots")
+                debug_dir.mkdir(exist_ok=True)
+
+                # Get popup text for filename
+                popup_text = popup.inner_text()[:50].replace('/', '_').replace('\\', '_')
+                screenshot_path = debug_dir / f"popup_{hash(popup_text) % 10000}.png"
+
+                popup.screenshot(path=str(screenshot_path), timeout=2000)
+                logger.debug(f"Popup screenshot saved to: {screenshot_path}")
+
+                # Also save the HTML content
+                html_path = debug_dir / f"popup_{hash(popup_text) % 10000}.html"
+                with open(html_path, 'w', encoding='utf-8') as f:
+                    f.write(popup.inner_html())
+                logger.debug(f"Popup HTML saved to: {html_path}")
+
+            except Exception as e:
+                logger.debug(f"Could not save popup screenshot/HTML: {e}")
+
             # Try specific OWA selectors (these may vary based on OWA version)
             dom_data = {}
 
-            # Common OWA popup selectors (examples based on research)
+            # Strategy: Use text-based selectors that are more stable
+            # First, extract all data using the stable text labels
+            extracted_data = self._extract_by_text_labels(popup)
+            if extracted_data:
+                dom_data.update(extracted_data)
+                logger.debug(f"Extracted via text labels: {list(extracted_data.keys())}")
+
+            # Extract email separately - need to find the PERSONAL email, not the token
+            if 'email' not in dom_data:
+                personal_email = self._extract_personal_email(popup)
+                if personal_email:
+                    dom_data['email'] = personal_email
+                    logger.debug(f"Found personal email: {personal_email}")
+
+            # Fallback: Try CSS selectors for fields not yet found
             dom_selectors = {
                 'name': [
-                    'span._pe_c1._pe_t1',  # OWA 2019+
-                    'div.ms-ContactCard-primaryText',
-                    '[data-automation-id="contactCardName"]',
-                    '.ms-PersonaCard-primaryText',
+                    'span[class*="_pe_c1"][class*="_pe_t1"]',  # Primary name field
+                    'span[role="heading"][aria-label*="Tarjeta de contacto"]',
                 ],
-                'email': [
-                    'a[href^="mailto:"]',
-                    'span[title*="@"]',
-                    '[data-automation-id="contactCardEmail"]',
+                'sip': [
+                    'span[title^="sip:"]',
                 ],
-                'phone': [
-                    'a[href^="tel:"]',
-                    '[data-automation-id="contactCardPhone"]',
-                    '.ms-ContactCard-phoneText',
-                ],
-                'department': [
-                    '[data-automation-id="contactCardTitle"]',
-                    '.ms-ContactCard-jobTitle',
-                ],
-                'company': [
-                    '[data-automation-id="contactCardCompany"]',
-                    '.ms-ContactCard-company',
-                ],
-                'office_location': [
-                    '[data-automation-id="contactCardOffice"]',
-                    '.ms-ContactCard-office',
-                ]
             }
 
             for field, selectors in dom_selectors.items():
+                field_found = False
                 for selector in selectors:
                     try:
                         element = popup.locator(selector).first
-                        if element.count() > 0:
+                        count = element.count()
+                        logger.debug(f"Trying selector '{selector}' for field '{field}': found {count} elements")
+
+                        if count > 0:
                             text = element.inner_text(timeout=1000).strip()
+                            logger.debug(f"  Extracted text: '{text}'")
+
                             if text and text.lower() != field.lower():  # Avoid field name placeholders
                                 # Clean up common artifacts
                                 if field == 'email' and text.startswith('mailto:'):
@@ -220,9 +405,15 @@ class ContactExtractor:
                                     text = text.replace('tel:', '')
 
                                 dom_data[field] = text
+                                field_found = True
+                                logger.debug(f"  ✓ Successfully extracted {field}: {text}")
                                 break
-                    except:
+                    except Exception as e:
+                        logger.debug(f"  Error with selector '{selector}': {e}")
                         continue  # Try next selector
+
+                if not field_found:
+                    logger.debug(f"  ✗ No data found for field '{field}' with any selector")
 
             # If we got meaningful data from DOM, create ContactInfo
             if dom_data:

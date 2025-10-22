@@ -30,6 +30,13 @@ jobs:
             New-Item -ItemType Directory -Path "data" -Force
           }
 
+      - name: Install Python dependencies
+        shell: pwsh
+        run: |
+          python -m pip install -U pip wheel setuptools
+          pip install -r requirements.txt
+          pip install pyinstaller
+
       - name: Create config example if missing
         shell: pwsh
         run: |
@@ -159,13 +166,6 @@ print('Excel template created successfully')
           key: ${{ runner.os }}-pyinstaller-${{ hashFiles('**/*.py', 'requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-pyinstaller-
-
-      - name: Install Python dependencies
-        shell: pwsh
-        run: |
-          python -m pip install -U pip wheel setuptools
-          pip install -r requirements.txt
-          pip install pyinstaller
 
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'

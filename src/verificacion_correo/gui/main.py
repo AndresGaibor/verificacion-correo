@@ -124,8 +124,8 @@ class VerificacionCorreosGUI:
         # Initialize service
         self.service = GUIService(self.config)
 
-        # Setup logging for GUI
-        setup_logging(level="INFO")
+        # Setup logging for GUI - use DEBUG to see detailed asyncio/playwright logs
+        setup_logging(level="DEBUG")
         self.log_messages = []
 
         # Create interface
@@ -714,23 +714,59 @@ Resultados guardados en: {self.excel_path_var.get()}"""
         if not messagebox.askyesno(
             "Configurar Sesión",
             "Se abrirá una ventana del navegador para que inicie sesión manualmente.\n"
+            "Después de iniciar sesión, vuelve a esta ventana y presiona OK.\n\n"
             "¿Desea continuar?"
         ):
             return
 
         try:
-            # This would open a browser window for manual setup
-            # For now, show instructions
+            # Run session setup in a separate thread to avoid blocking GUI
+            import threading
+
+            def setup_in_background():
+                try:
+                    success = self.service.setup_session()
+                    if success:
+                        # Show success message in main thread
+                        self.root.after(0, lambda: messagebox.showinfo(
+                            "Éxito",
+                            "Sesión configurada correctamente.\n\n"
+                            "La sesión ha sido guardada y puedes comenzar a procesar correos."
+                        ))
+                    else:
+                        # Show error message in main thread
+                        self.root.after(0, lambda: messagebox.showerror(
+                            "Error",
+                            "No se pudo configurar la sesión.\n\n"
+                            "Asegúrate de iniciar sesión correctamente antes de guardar."
+                        ))
+
+                    # Update session status in main thread
+                    self.root.after(0, self._check_session_status)
+
+                except Exception as e:
+                    # Show error message in main thread
+                    self.root.after(0, lambda: messagebox.showerror(
+                        "Error",
+                        f"Error durante la configuración de sesión: {e}"
+                    ))
+
+            # Start background thread
+            setup_thread = threading.Thread(target=setup_in_background, daemon=True)
+            setup_thread.start()
+
+            # Show info message about what will happen
             messagebox.showinfo(
-                "Configuración de Sesión",
-                "Use el comando CLI para configurar la sesión:\n\n"
-                "verificacion-correo setup\n\n"
-                "Luego verifique la sesión en esta pestaña."
+                "Configuración en Progreso",
+                "Se está abriendo una ventana del navegador...\n\n"
+                "1. Inicia sesión con tus credenciales\n"
+                "2. Navega a tu bandeja de entrada\n"
+                "3. Vuelve a esta ventana y presiona ENTER en la terminal\n"
+                "4. La sesión se guardará automáticamente"
             )
-            self._check_session_status()
 
         except Exception as e:
-            messagebox.showerror("Error", f"Error al configurar sesión: {e}")
+            messagebox.showerror("Error", f"Error al iniciar configuración de sesión: {e}")
 
     def _delete_session(self):
         """Delete browser session."""

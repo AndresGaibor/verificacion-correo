@@ -1,5 +1,8 @@
 # Entorno virtual
 .venv/
+.venv312/
+*.png
+*.html
 
 # Archivos de sesión y configuración sensible
 state.json

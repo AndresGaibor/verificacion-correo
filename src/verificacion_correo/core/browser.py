@@ -96,36 +96,79 @@ class BrowserAutomation:
             f"organized into {len(summary.batches)} batches"
         )
 
-        # Process all batches
-        total_stats = ProcessingStats(0, 0, 0, 0, 0, 0.0)
-        batch_results = []
+        # Fix for asyncio event loop conflict when running in threads
+        import asyncio
+        import threading
+        import os
 
-        with sync_playwright() as p:
-            # Setup browser context
-            context = self._create_automation_context(p)
-            if not context:
-                raise RuntimeError("Failed to create browser context")
+        # Log thread and loop state for debugging
+        thread_id = threading.current_thread().ident
+        thread_name = threading.current_thread().name
+        logger.debug(f"Processing emails in thread {thread_name} (ID: {thread_id})")
 
-            try:
-                # Process each batch
-                for batch_num, batch_records in enumerate(summary.batches, 1):
-                    result = self._process_batch(context, batch_records, batch_num)
-                    batch_results.append(result)
+        # Strategy 1: Set environment variable to force sync API
+        os.environ['PLAYWRIGHT_PYTHON_SYNC_API_IN_THREAD'] = '1'
+        logger.debug("Set PLAYWRIGHT_PYTHON_SYNC_API_IN_THREAD=1 for browser.py")
 
-                    # Update running totals
-                    total_stats.total_batches = batch_num
-                    total_stats.total_emails += result.total_emails
-                    total_stats.successful += result.successful
-                    total_stats.not_found += result.not_found
-                    total_stats.errors += result.errors
+        # Strategy 2: Remove event loop for the duration of Playwright operations
+        old_loop = None
+        loop_was_running = False
+        try:
+            old_loop = asyncio.get_event_loop()
+            loop_was_running = old_loop.is_running() if old_loop else False
+            logger.debug(f"Found existing event loop: {old_loop}, running: {loop_was_running}")
+            asyncio.set_event_loop(None)
+            logger.debug("Event loop temporarily removed for processing")
+        except RuntimeError as e:
+            logger.debug(f"No event loop in current thread: {e}")
+            pass
 
-                    # Write batch results to Excel
-                    self.excel_writer.write_batch_results(result.records)
+        try:
+            # Process all batches
+            total_stats = ProcessingStats(0, 0, 0, 0, 0, 0.0)
+            batch_results = []
 
-                    logger.info(f"Batch {batch_num}/{len(summary.batches)} completed")
+            logger.debug("Starting sync_playwright() context manager...")
+            with sync_playwright() as p:
+                logger.debug("sync_playwright() context entered successfully")
 
-            finally:
-                context.close()
+                # Setup browser context
+                context = self._create_automation_context(p)
+                if not context:
+                    raise RuntimeError("Failed to create browser context")
+
+                try:
+                    # Process each batch
+                    for batch_num, batch_records in enumerate(summary.batches, 1):
+                        logger.debug(f"Starting batch {batch_num}/{len(summary.batches)}")
+                        result = self._process_batch(context, batch_records, batch_num)
+                        batch_results.append(result)
+
+                        # Update running totals
+                        total_stats.total_batches = batch_num
+                        total_stats.total_emails += result.total_emails
+                        total_stats.successful += result.successful
+                        total_stats.not_found += result.not_found
+                        total_stats.errors += result.errors
+
+                        # Write batch results to Excel
+                        self.excel_writer.write_batch_results(result.records)
+
+                        logger.info(f"Batch {batch_num}/{len(summary.batches)} completed")
+
+                finally:
+                    logger.debug("Closing browser context...")
+                    context.close()
+                    logger.debug("Browser context closed")
+
+        except Exception as e:
+            logger.error(f"Error during email processing: {e}", exc_info=True)
+            raise
+        finally:
+            # Restore event loop if it existed
+            if old_loop is not None:
+                asyncio.set_event_loop(old_loop)
+                logger.debug(f"Event loop restored in browser.py: {old_loop}")
 
         total_stats.duration_seconds = time.time() - start_time
         self._log_final_results(total_stats)
@@ -134,10 +177,32 @@ class BrowserAutomation:
 
     def _create_automation_context(self, playwright):
         """Create browser context with session for automation."""
-        context = self.session_manager.create_automation_context()
-        if not context:
+        # Use the provided playwright instance instead of creating a new one
+        logger.debug("Creating browser context using existing playwright instance")
+
+        try:
+            # Launch browser with session
+            logger.debug(f"Launching browser (headless={self.config.browser.headless})...")
+            browser = playwright.chromium.launch(
+                headless=self.config.browser.headless
+            )
+            logger.debug("Browser launched successfully")
+
+            # Create context with saved session state
+            session_file = self.session_manager.session_file
+            logger.debug(f"Creating browser context with session: {session_file}")
+            context = browser.new_context(
+                storage_state=str(session_file),
+                viewport={'width': 1280, 'height': 720}
+            )
+            logger.debug("Browser context created successfully")
+            logger.info(f"Browser context created with session: {session_file}")
+
+            return context
+
+        except Exception as e:
+            logger.error(f"Error creating automation context: {e}", exc_info=True)
             raise RuntimeError("Failed to create automation context")
-        return context
 
     def _process_batch(self, context, email_records: List[EmailRecord], batch_number: int) -> BatchResult:
         """
@@ -300,20 +365,58 @@ class BrowserAutomation:
         """
         Determine if extracted contact information is valid.
 
-        Uses SIP presence as primary validation criterion since it's the most
-        reliable indicator of a valid contact in OWA.
+        A contact is considered valid if we extracted ANY meaningful information,
+        which indicates the user exists in OWA (popup opened successfully).
+
+        The distinction is:
+        - VALID (EXISTS): Popup opened, extracted at least one field
+        - NOT FOUND: Popup didn't open, no data extracted, or extraction failed
         """
-        # Primary validation: SIP address indicates valid contact
+        # If we extracted nothing, user doesn't exist or popup failed
+        if not contact_info:
+            return False
+
+        # Primary validation: SIP address indicates valid contact with full data
         if contact_info.sip and contact_info.sip.strip():
             return True
 
-        # Secondary validation: personal email indicates valid contact
+        # Secondary validation: personal email (not generic token) indicates valid contact
         if (contact_info.email and contact_info.email.strip() and
                 not re.match(r'^(ASP|AGM|AEM|ADM)\d+@', contact_info.email, re.I)):
             return True
 
         # Tertiary validation: phone number indicates valid contact
         if contact_info.phone and contact_info.phone.strip():
+            return True
+
+        # Quaternary validation: If we have at least a name AND email (even if token email),
+        # the user EXISTS - OWA showed the popup with their information
+        if contact_info.name and contact_info.name.strip() and contact_info.email and contact_info.email.strip():
+            logger.debug(f"Contact validated by name + email presence: {contact_info.name}")
+            return True
+
+        # Quinary validation: Address or department info indicates valid contact
+        if contact_info.address and contact_info.address.strip():
+            return True
+
+        if contact_info.department and contact_info.department.strip():
+            return True
+
+        # If we have ANY field populated, the user exists (popup opened)
+        # This catches edge cases where OWA anti-scraping blocks most fields
+        has_any_data = any([
+            contact_info.name,
+            contact_info.email,
+            contact_info.phone,
+            contact_info.sip,
+            contact_info.address,
+            contact_info.department,
+            contact_info.company,
+            contact_info.office_location
+        ])
+
+        if has_any_data:
+            logger.debug(f"Contact validated by having at least one field populated")
             return True
 
         return False

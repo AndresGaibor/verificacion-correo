@@ -47,6 +47,41 @@ class ProcessingConfig:
 
 
 @dataclass
+class AntiDetectionConfig:
+    """Anti-detection configuration."""
+    enabled: bool = False
+    use_nodriver: bool = False  # Use NoDriver instead of Playwright
+
+    # Individual technique toggles
+    mouse_emulation: bool = True
+    human_typing: bool = True
+    random_delays: bool = True
+    user_agent_rotation: bool = True
+
+    # Mouse emulation settings
+    mouse_bezier_curves: bool = True
+    mouse_random_offset_px: int = 10
+    mouse_move_duration_ms_min: int = 500
+    mouse_move_duration_ms_max: int = 1500
+
+    # Typing settings
+    typing_chars_per_second_min: float = 2.0
+    typing_chars_per_second_max: float = 6.0
+    typing_mistake_probability: float = 0.02
+
+    # Delay settings
+    delay_between_actions_min: int = 500
+    delay_between_actions_max: int = 2000
+    delay_between_emails_min: int = 3000
+    delay_between_emails_max: int = 8000
+
+    # User-Agent settings
+    ua_rotate: bool = True
+    ua_pool_size: int = 10
+    ua_prefer_platform: Optional[str] = None  # 'windows', 'mac', 'linux', or None
+
+
+@dataclass
 class Selectors:
     """CSS selectors for OWA interface elements."""
     new_message_btn: str = 'button[title="Escribir un mensaje nuevo (N)"]'
@@ -91,6 +126,7 @@ class Config:
         browser: Browser configuration
         excel: Excel configuration
         processing: Processing configuration
+        antidetection: Anti-detection configuration
         selectors: CSS selectors
         wait_times: Wait times
         patterns: Regex patterns
@@ -188,6 +224,28 @@ class Config:
             'processing': {
                 'batch_size': 10
             },
+            'antidetection': {
+                'enabled': False,
+                'use_nodriver': False,
+                'mouse_emulation': True,
+                'human_typing': True,
+                'random_delays': True,
+                'user_agent_rotation': True,
+                'mouse_bezier_curves': True,
+                'mouse_random_offset_px': 10,
+                'mouse_move_duration_ms_min': 500,
+                'mouse_move_duration_ms_max': 1500,
+                'typing_chars_per_second_min': 2.0,
+                'typing_chars_per_second_max': 6.0,
+                'typing_mistake_probability': 0.02,
+                'delay_between_actions_min': 500,
+                'delay_between_actions_max': 2000,
+                'delay_between_emails_min': 3000,
+                'delay_between_emails_max': 8000,
+                'ua_rotate': True,
+                'ua_pool_size': 10,
+                'ua_prefer_platform': None
+            },
             'selectors': {
                 'new_message_btn': 'button[title="Escribir un mensaje nuevo (N)"]',
                 'to_field_role': 'textbox',
@@ -247,6 +305,9 @@ class Config:
 
         processing_data = self._config_data.get('processing', {})
         self.processing = ProcessingConfig(**processing_data)
+
+        antidetection_data = self._config_data.get('antidetection', {})
+        self.antidetection = AntiDetectionConfig(**antidetection_data)
 
         selectors_data = self._config_data.get('selectors', {})
         self.selectors = Selectors(**selectors_data)
