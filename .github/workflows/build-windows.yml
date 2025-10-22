@@ -1,0 +1,133 @@
+name: build-windows
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write  # necesario para crear releases
+
+jobs:
+  build-online:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: 'pip'
+          cache-dependency-path: 'requirements.txt'
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~\AppData\Local\ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
+      - name: Cache PyInstaller build
+        uses: actions/cache@v4
+        with:
+          path: |
+            build
+            *.spec
+          key: ${{ runner.os }}-pyinstaller-${{ hashFiles('**/*.py', 'requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pyinstaller-
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install -U pip wheel setuptools
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          Write-Host "Cache miss - Instalando navegadores Playwright..."
+          playwright install chromium
+
+      - name: Clean previous builds
+        shell: pwsh
+        run: |
+          if (Test-Path dist) { Remove-Item -Recurse -Force dist }
+
+      - name: Build (onefile)
+        shell: pwsh
+        run: |
+          pyinstaller --onefile `
+            --collect-all playwright `
+            --collect-all openpyxl `
+            --collect-all yaml `
+            --hidden-import tkinter `
+            --hidden-import tkinter.ttk `
+            --hidden-import tkinter.scrolledtext `
+            --hidden-import tkinter.filedialog `
+            --hidden-import tkinter.messagebox `
+            --hidden-import excel_reader `
+            --hidden-import excel_writer `
+            --hidden-import browser_automation `
+            --hidden-import contact_extractor `
+            --hidden-import config `
+            --hidden-import copiar_sesion `
+            --hidden-import gui `
+            --hidden-import gui_config_manager `
+            --hidden-import gui_runner `
+            --hidden-import gui_session_manager `
+            --hidden-import iniciar_gui `
+            --exclude-module matplotlib `
+            --exclude-module scipy `
+            --exclude-module pytest `
+            --exclude-module IPython `
+            --exclude-module jupyter `
+            --exclude-module pandas `
+            --exclude-module numpy `
+            --exclude-module PIL `
+            --exclude-module cv2 `
+            app.py
+
+      - name: Test executable
+        shell: pwsh
+        run: |
+          if (!(Test-Path dist/app.exe)) {
+            Write-Error "El ejecutable no se creó correctamente"
+            exit 1
+          }
+          $size = (Get-Item dist/app.exe).Length / 1MB
+          Write-Host "Tamaño del ejecutable: $($size) MB"
+          if ($size -lt 50) {
+            Write-Warning "El ejecutable parece muy pequeño ($($size) MB). Puede que falten dependencias."
+          }
+
+      - name: Upload artifact (.exe)
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-win
+          path: dist/app.exe
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Rename binary with tag
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: Copy-Item dist/app.exe "dist/VerificacionCorreos-win-${{ github.ref_name }}.exe"
+
+      - name: Publish Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/VerificacionCorreos-win-${{ github.ref_name }}.exe
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
