@@ -8,8 +8,9 @@
 state.json
 config.yaml
 
-# Archivos de datos
+# Archivos de datos (excepto templates)
 *.xlsx
+!data/correos_template.xlsx
 
 # Cache de Python
 __pycache__/
