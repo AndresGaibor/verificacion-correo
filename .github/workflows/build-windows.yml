@@ -160,14 +160,12 @@ print('Excel template created successfully')
           restore-keys: |
             ${{ runner.os }}-pyinstaller-
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         shell: pwsh
         run: |
           python -m pip install -U pip wheel setuptools
           pip install -r requirements.txt
           pip install pyinstaller
-          # Ensure openpyxl is available for template creation
-          pip install openpyxl
 
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
@@ -185,9 +183,12 @@ print('Excel template created successfully')
         shell: pwsh
         run: |
           pyinstaller --onefile `
+            --name VerificacionCorreos `
             --collect-all playwright `
             --collect-all openpyxl `
-            --collect-all yaml `
+            --collect-all pyyaml `
+            --collect-all nodriver `
+            --collect-all fake_useragent `
             --add-data "config.yaml.example;." `
             --add-data "data/correos_template.xlsx;data" `
             --hidden-import tkinter `
@@ -198,8 +199,16 @@ print('Excel template created successfully')
             --hidden-import verificacion_correo.core.config `
             --hidden-import verificacion_correo.core.excel `
             --hidden-import verificacion_correo.core.browser `
+            --hidden-import verificacion_correo.core.browser_nodriver `
             --hidden-import verificacion_correo.core.session `
             --hidden-import verificacion_correo.core.extractor `
+            --hidden-import verificacion_correo.core.first_run `
+            --hidden-import verificacion_correo.core.antidetection `
+            --hidden-import verificacion_correo.core.antidetection.delays `
+            --hidden-import verificacion_correo.core.antidetection.mouse_emulator `
+            --hidden-import verificacion_correo.core.antidetection.typing_simulator `
+            --hidden-import verificacion_correo.core.antidetection.user_agents `
+            --hidden-import verificacion_correo.core.antidetection.nodriver_manager `
             --hidden-import verificacion_correo.gui.main `
             --hidden-import verificacion_correo.cli.main `
             --hidden-import verificacion_correo.utils.logging `
@@ -217,11 +226,11 @@ print('Excel template created successfully')
       - name: Test executable
         shell: pwsh
         run: |
-          if (!(Test-Path dist/app.exe)) {
+          if (!(Test-Path dist/VerificacionCorreos.exe)) {
             Write-Error "El ejecutable no se creó correctamente"
             exit 1
           }
-          $size = (Get-Item dist/app.exe).Length / 1MB
+          $size = (Get-Item dist/VerificacionCorreos.exe).Length / 1MB
           Write-Host "Tamaño del ejecutable: $($size) MB"
           if ($size -lt 50) {
             Write-Warning "El ejecutable parece muy pequeño ($($size) MB). Puede que falten dependencias."
@@ -230,23 +239,25 @@ print('Excel template created successfully')
       - name: Upload artifact (.exe)
         uses: actions/upload-artifact@v4
         with:
-          name: app-win
-          path: dist/app.exe
+          name: verificacion-correos-win
+          path: dist/VerificacionCorreos.exe
           if-no-files-found: error
           retention-days: 14
 
       - name: Rename binary with tag
         if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
-        run: Copy-Item dist/app.exe "dist/VerificacionCorreos-win-${{ github.ref_name }}.exe"
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: Copy-Item dist/VerificacionCorreos.exe "dist/VerificacionCorreos-win-$env:TAG_NAME.exe"
 
       - name: Publish Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/VerificacionCorreos-win-${{ github.ref_name }}.exe
-          fail_on_unmatched_files: true
-          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+        with:
+          files: dist/VerificacionCorreos-win-*.exe
+          fail_on_unmatched_files: true
+          generate_release_notes: true

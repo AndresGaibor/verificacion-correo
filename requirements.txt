@@ -3,14 +3,13 @@ playwright>=1.40.0
 openpyxl>=3.1.2
 pyyaml>=6.0.1
 
-# Optional dependencies for enhanced functionality
-# Uncomment if needed:
-# pyinstaller>=6.0.0        # For creating standalone executables
-# tkinter                     # Usually included with Python
-# logging                    # Usually included with Python
-# pathlib                    # Usually included with Python
-# threading                  # Usually included with Python
-# queue                      # Usually included with Python
-# enum                       # Usually included with Python
-# dataclasses                # Usually included with Python (Python 3.7+)
-# typing                     # Usually included with Python
+# Anti-detection dependencies (required for anti-detection features)
+nodriver>=0.33.0
+python-ghost-cursor>=1.0.0
+fake-useragent>=1.5.0
+
+# Build dependencies (for PyInstaller)
+# Install separately: pip install pyinstaller>=6.0.0
+
+# Note: tkinter, logging, pathlib, threading, queue, enum, dataclasses, typing
+# are all part of Python standard library and don't need to be installed
