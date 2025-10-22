@@ -37,6 +37,13 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          Write-Host "Installing Playwright browsers..."
+          python -m playwright install chromium
+
       - name: Verify required files exist
         shell: pwsh
         run: |
@@ -79,13 +86,6 @@ jobs:
           key: ${{ runner.os }}-pyinstaller-${{ hashFiles('**/*.py', 'requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-pyinstaller-
-
-      - name: Install Playwright browsers
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: |
-          Write-Host "Cache miss - Instalando navegadores Playwright..."
-          python -m playwright install chromium
 
       - name: Clean previous builds
         shell: pwsh
