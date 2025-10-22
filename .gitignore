@@ -15,3 +15,20 @@ __pycache__/
 
 # Directorio de usuario de Chrome (Patchright)
 .chrome_user_data/
+
+# Build files and distributions (PyInstaller)
+build/
+dist/
+*.spec
+
+# Archivos temporales de ejecución
+*.log
+*.exe
+*.app
+*.dmg
+*.deb
+*.rpm
+
+# Archivos del sistema operativo
+.DS_Store
+Thumbs.db
