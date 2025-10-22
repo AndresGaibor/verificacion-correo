@@ -37,104 +37,10 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Create config example if missing
-        shell: pwsh
-        run: |
-          if (!(Test-Path "config.yaml.example")) {
-            @"
-# Archivo de Configuración de Ejemplo - Verificación de Correos OWA
-# Copia este archivo a config.yaml y ajusta los valores según tus necesidades
-
-# URL de la página de OWA (Outlook Web Access) de Madrid
-page_url: https://correoweb.madrid.org/owa/#path=/mail
-
-# Correos electrónicos de respaldo (se usan si no hay archivo Excel)
-default_emails:
-  - ASP164@MADRID.ORG
-  - AGM564@MADRID.ORG
-  - USUARIO3@MADRID.ORG
-
-# Configuración del navegador web
-browser:
-  headless: false
-  session_file: state.json
-
-# Configuración del archivo Excel
-excel:
-  default_file: data/correos.xlsx
-  start_row: 2
-  email_column: 1
-
-# Configuración del procesamiento
-processing:
-  batch_size: 10
-
-# Selectores CSS para elementos de la interfaz OWA
-selectors:
-  new_message_btn: button[title="Escribir un mensaje nuevo (N)"]
-  to_field_role: textbox
-  to_field_name: Para
-  popup: div._pe_Y[ispopup="1"]
-  discard_btn: button[aria-label="Descartar"]
-
-# Tiempos de espera en milisegundos
-wait_times:
-  after_new_message: 1000
-  after_fill_to: 3000
-  after_blur: 500
-  popup_visible: 5000
-  after_click_token: 2000
-  popup_load_data: 5000
-  after_close_popup: 1000
-  before_discard: 2000
-"@ | Out-File -FilePath "config.yaml.example" -Encoding UTF8
-            Write-Host "config.yaml.example created"
-          }
-
-      - name: Create Excel template if missing
-        shell: pwsh
-        run: |
-          if (!(Test-Path "data/correos_template.xlsx")) {
-            python -c "
-import openpyxl
-from openpyxl import Workbook
-
-# Create workbook
-wb = Workbook()
-ws = wb.active
-ws.title = 'Contactos'
-
-# Add headers
-headers = ['Correo', 'Estado', 'Nombre', 'Email Personal', 'Teléfono', 'Dirección', 'Departamento', 'Compañía', 'Oficina', 'SIP', 'Fecha Procesamiento', 'Observaciones']
-for col_idx, header in enumerate(headers, start=1):
-    ws.cell(row=1, column=col_idx, value=header)
-
-# Add sample data
-sample_emails = ['ASP164@MADRID.ORG', 'AGM564@MADRID.ORG', 'USR789@MADRID.ORG']
-for row_idx, email in enumerate(sample_emails, start=2):
-    ws.cell(row=row_idx, column=1, value=email)
-    ws.cell(row=row_idx, column=2, value='')
-
-# Adjust column widths
-for col in range(1, len(headers) + 1):
-    from openpyxl.utils import get_column_letter
-    column_letter = get_column_letter(col)
-    ws.column_dimensions[column_letter].width = 20
-
-wb.save('data/correos_template.xlsx')
-print('Excel template created successfully')
-"
-          }
-
       - name: Verify required files exist
         shell: pwsh
         run: |
           Write-Host "Checking required files..."
-
-          if (!(Test-Path "config.yaml.example")) {
-            Write-Error "config.yaml.example not found"
-            exit 1
-          }
 
           if (!(Test-Path "data/correos_template.xlsx")) {
             Write-Error "data/correos_template.xlsx not found"
@@ -144,6 +50,13 @@ print('Excel template created successfully')
           if (!(Test-Path "src/verificacion_correo/__main__.py")) {
             Write-Error "Main entry point not found"
             exit 1
+          }
+
+          # config.yaml.example is optional - it's in the repo
+          if (Test-Path "config.yaml.example") {
+            Write-Host "✓ config.yaml.example found"
+          } else {
+            Write-Warning "config.yaml.example not found (optional)"
           }
 
           Write-Host "All required files found"
