@@ -68,22 +68,21 @@ jobs:
             --collect-all playwright `
             --collect-all openpyxl `
             --collect-all yaml `
+            --add-data "config.yaml.example;." `
+            --add-data "data/correos_template.xlsx;data" `
             --hidden-import tkinter `
             --hidden-import tkinter.ttk `
             --hidden-import tkinter.scrolledtext `
             --hidden-import tkinter.filedialog `
             --hidden-import tkinter.messagebox `
-            --hidden-import excel_reader `
-            --hidden-import excel_writer `
-            --hidden-import browser_automation `
-            --hidden-import contact_extractor `
-            --hidden-import config `
-            --hidden-import copiar_sesion `
-            --hidden-import gui `
-            --hidden-import gui_config_manager `
-            --hidden-import gui_runner `
-            --hidden-import gui_session_manager `
-            --hidden-import iniciar_gui `
+            --hidden-import verificacion_correo.core.config `
+            --hidden-import verificacion_correo.core.excel `
+            --hidden-import verificacion_correo.core.browser `
+            --hidden-import verificacion_correo.core.session `
+            --hidden-import verificacion_correo.core.extractor `
+            --hidden-import verificacion_correo.gui.main `
+            --hidden-import verificacion_correo.cli.main `
+            --hidden-import verificacion_correo.utils.logging `
             --exclude-module matplotlib `
             --exclude-module scipy `
             --exclude-module pytest `
@@ -93,7 +92,7 @@ jobs:
             --exclude-module numpy `
             --exclude-module PIL `
             --exclude-module cv2 `
-            app.py
+            src/verificacion_correo/__main__.py
 
       - name: Test executable
         shell: pwsh

@@ -1,0 +1,28 @@
+page_url: https://correoweb.madrid.org/owa/#path=/mail
+default_emails:
+- ASP164@MADRID.ORG
+- AGM564@MADRID.ORG
+browser:
+  headless: false
+  session_file: state.json
+excel:
+  default_file: data/correos.xlsx
+  start_row: 2
+  email_column: 1
+processing:
+  batch_size: 10
+selectors:
+  new_message_btn: button[title="Escribir un mensaje nuevo (N)"]
+  to_field_role: textbox
+  to_field_name: Para
+  popup: div._pe_Y[ispopup="1"]
+  discard_btn: button[aria-label="Descartar"]
+wait_times:
+  after_new_message: 1000
+  after_fill_to: 3000
+  after_blur: 500
+  popup_visible: 5000
+  after_click_token: 2000
+  popup_load_data: 5000
+  after_close_popup: 1000
+  before_discard: 2000

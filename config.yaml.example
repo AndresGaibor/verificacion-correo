@@ -1,44 +1,71 @@
-# Configuración de la aplicación de verificación de correos
-# Copia este archivo a config.yaml y completa con tus valores reales
+# Archivo de Configuración de Ejemplo - Verificación de Correos OWA
+# Copia este archivo a config.yaml y ajusta los valores según tus necesidades
 
-# URL de la aplicación webmail OWA
-page_url: "https://your-webmail-server.org/owa/#path=/mail"
+# URL de la página de OWA (Outlook Web Access) de Madrid
+page_url: https://correoweb.madrid.org/owa/#path=/mail
 
-# Emails por defecto (fallback si no se encuentra archivo Excel)
+# Correos electrónicos de respaldo (se usan si no hay archivo Excel)
+# Estos correos se utilizan como ejemplo cuando no se puede leer el archivo Excel
 default_emails:
-  - "USER1@DOMAIN.ORG"
-  - "USER2@DOMAIN.ORG"
+  - ASP164@MADRID.ORG
+  - AGM564@MADRID.ORG
+  - USUARIO3@MADRID.ORG
 
-# Configuración del navegador
+# Configuración del navegador web
 browser:
-  headless: false  # Mostrar ventana del navegador (true/false)
-  session_file: "state.json"  # Archivo con sesión guardada
+  headless: false               # false para ver el navegador, true para modo invisible
+  session_file: state.json      # archivo donde se guarda la sesión de autenticación
 
-# Configuración de Excel
+# Configuración del archivo Excel
 excel:
-  default_file: "data/correos.xlsx"  # Ruta al archivo Excel
-  start_row: 2  # Fila inicial (la fila 1 es el encabezado)
-  email_column: 1  # Columna A (primera columna)
+  default_file: data/correos.xlsx   # ruta al archivo Excel con los correos a procesar
+  start_row: 2                        # fila desde donde empiezan los datos (número, no índice)
+  email_column: 1                     # columna donde están los correos (1 = columna A)
+
+# Configuración del procesamiento
+processing:
+  batch_size: 10                 # cantidad de correos a procesar en cada lote
 
 # Selectores CSS para elementos de la interfaz OWA
+# NO MODIFICAR a menos que la interfaz de OWA cambie
 selectors:
-  new_message_btn: 'button[title="Escribir un mensaje nuevo (N)"]'
-  to_field_role: "textbox"
-  to_field_name: "Para"
-  popup: 'div._pe_Y[ispopup="1"]'
-  discard_btn: 'button[aria-label="Descartar"]'
+  new_message_btn: button[title="Escribir un mensaje nuevo (N)"]
+  to_field_role: textbox
+  to_field_name: Para
+  popup: div._pe_Y[ispopup="1"]
+  discard_btn: button[aria-label="Descartar"]
 
 # Tiempos de espera en milisegundos
+# Ajusta estos valores si tienes problemas de velocidad o conexión
 wait_times:
-  after_new_message: 1000
-  after_fill_to: 3000
-  after_blur: 500
-  popup_visible: 5000
-  after_click_token: 2000
-  popup_load_data: 5000
-  after_close_popup: 1000
-  before_discard: 2000
+  after_new_message: 1000        # después de hacer clic en nuevo mensaje
+  after_fill_to: 3000            # después de llenar el campo "Para"
+  after_blur: 500                # después de salir del campo "Para"
+  popup_visible: 5000            # tiempo máximo para esperar que aparezca el popup
+  after_click_token: 2000        # después de hacer clic en un token de correo
+  popup_load_data: 5000          # tiempo para que el popup cargue los datos
+  after_close_popup: 1000        # después de cerrar el popup
+  before_discard: 2000           # antes de descartar el mensaje
 
-# Configuración de procesamiento
-processing:
-  batch_size: 10  # Tamaño de lote para procesamiento
+# Notas de configuración:
+#
+# 1. Archivo de sesión (state.json):
+#    - Se crea automáticamente al configurar la sesión por primera vez
+#    - Contiene las cookies de autenticación
+#    - DEBE existir antes de procesar correos
+#    - Usa la GUI o el comando "verificacion-correo setup" para crearlo
+#
+# 2. Archivo Excel:
+#    - Debe tener encabezado en la fila 1
+#    - Los correos deben estar en la columna A desde la fila 2 en adelante
+#    - El archivo example data/correos_template.xlsx sirve como referencia
+#
+# 3. Primer ejecución:
+#    - Si config.yaml no existe, el programa lo creará automáticamente
+#    - Si data/correos.xlsx no existe, se creará uno con correos de ejemplo
+#    - La aplicación detectará recursos faltantes y te guiará en la configuración
+#
+# 4. Configuración desde GUI:
+#    - Puedes modificar todos estos valores desde la pestaña "Configuración"
+#    - Los cambios se guardan automáticamente
+#    - Puedes seleccionar archivos Excel personalizados

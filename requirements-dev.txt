@@ -1,0 +1,23 @@
+# Development dependencies for verificacion-correo
+# Includes core dependencies
+-r requirements.txt
+
+# Testing
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.0.0
+
+# Code formatting and linting
+black>=23.0.0
+ruff>=0.1.0
+mypy>=1.0.0
+types-PyYAML>=6.0.0
+
+# Build and packaging
+build>=0.10.0
+twine>=4.0.0
+wheel>=0.40.0
+
+# Documentation (if needed)
+sphinx>=5.0.0
+sphinx-rtd-theme>=1.2.0

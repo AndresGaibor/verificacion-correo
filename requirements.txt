@@ -1,11 +1,16 @@
-# Requirements for Verificación de Correos OWA
-# Core dependencies
+# Core dependencies for verificacion-correo
 playwright>=1.40.0
 openpyxl>=3.1.2
-PyYAML>=6.0.1
+pyyaml>=6.0.1
 
-# Build dependencies
-pyinstaller>=6.3.0
-
-# Optional: For better debugging and logging
-colorama>=0.4.6
+# Optional dependencies for enhanced functionality
+# Uncomment if needed:
+# pyinstaller>=6.0.0        # For creating standalone executables
+# tkinter                     # Usually included with Python
+# logging                    # Usually included with Python
+# pathlib                    # Usually included with Python
+# threading                  # Usually included with Python
+# queue                      # Usually included with Python
+# enum                       # Usually included with Python
+# dataclasses                # Usually included with Python (Python 3.7+)
+# typing                     # Usually included with Python

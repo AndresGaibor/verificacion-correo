@@ -1,19 +1,21 @@
-# Verificación de Correos OWA
+# Verificación de Correos OWA v2.0
 
-Herramienta de automatización Python que utiliza Playwright para interactuar con la interfaz webmail de Madrid (correoweb.madrid.org/owa) y extraer información de contactos de recipientes de correos electrónicos.
+Herramienta moderna de automatización Python que utiliza Playwright para interactuar con la interfaz webmail de Madrid (correoweb.madrid.org/owa) y extraer información de contactos de recipientes de correos electrónicos.
 
-## 🚀 Características
+## 🚀 Características Principales
 
-- **Automatización Inteligente**: Interactúa con OWA (Outlook Web Access) mediante Playwright
-- **Extracción de Datos**: Extrae automáticamente información de contacto de emails
-- **Procesamiento por Lotes**: Procesa múltiples correos en lotes para mejor rendimiento
-- **Interfaz GUI**: Incluye interfaz gráfica para facilitar el uso
-- **Sesión Persistente**: Reutiliza sesiones de autenticación para evitar logins repetidos
-- **Exportación Excel**: Guarda resultados en archivos Excel con formato estructurado
+- **🔧 Arquitectura Moderna**: Estructura `src/` con paquetes Python estándar 2025
+- **🧠 Automatización Inteligente**: Interactúa con OWA mediante Playwright
+- **📊 Extracción Robusta**: Extrae información de contacto con múltiples métodos (DOM + regex)
+- **⚡ Procesamiento por Lotes**: Procesamiento eficiente en lotes configurables
+- **🖥️ Doble Interfaz**: CLI potente y GUI intuitiva
+- **🔄 Sesión Persistente**: Reutilización de sesiones para evitar logins repetidos
+- **📈 Registro Detallado**: Logging estructurado y seguimiento de progreso
+- **🛠️ Configuración Flexible**: YAML + CLI + validación automática
 
 ## 📋 Requisitos
 
-- Python 3.11+
+- Python 3.8+ (recomendado 3.11+)
 - Navegador Chromium (instalado automáticamente por Playwright)
 
 ## ⚙️ Instalación y Configuración
@@ -30,150 +32,242 @@ python3 -m venv .venv
 source .venv/bin/activate  # En Windows: .venv\Scripts\activate
 ```
 
-### 3. Instalar dependencias
+### 3. Instalar el paquete
 ```bash
+# Modo desarrollo (recomendado)
+pip install -e .
+
+# O modo tradicional
 pip install -r requirements.txt
 playwright install chromium
 ```
 
-### 4. Configurar el archivo de configuración
+### 4. Configurar archivo de configuración
 ```bash
-# Copiar el archivo de ejemplo y configurarlo
+# Si no existe, crear desde ejemplo
 cp config.yaml.example config.yaml
 ```
 
-Edita `config.yaml` con tu configuración:
-- URL del servidor OWA
-- Emails por defecto
-- Selectores CSS para la interfaz
-- Tiempos de espera
+Edita `config.yaml` con tu configuración específica.
 
-### 5. Crear archivo de datos
-Crea un archivo Excel `data/correos.xlsx` con los emails a procesar:
+### 5. Preparar archivo de datos
+Crea un archivo Excel con los emails a procesar:
+- Ubicación: `data/correos.xlsx` (o la ruta que prefieras)
 - Columna A: Direcciones de correo (fila 2 en adelante)
 - Fila 1: Encabezado "Correo"
 
 ### 6. Establecer sesión de autenticación
 ```bash
-python copiar_sesion.py
-# Sigue las instrucciones para login manual y presiona ENTER para guardar sesión
+# Configurar sesión interactiva
+verificacion-correo setup
+
+# O alternativamente
+python -m verificacion_correo setup
 ```
 
 ## 🔧 Uso
 
 ### Modo CLI (Línea de Comandos)
+
+La nueva CLI incluye múltiples comandos y opciones:
+
 ```bash
-# Procesar todos los emails del Excel
-python app.py
+# Procesar emails pendientes (comando por defecto)
+verificacion-correo
+verificacion-correo process
+
+# Verificar estado y validación
+verificacion-correo validate
+verificacion-correo status
+
+# Configurar sesión
+verificacion-correo setup
+
+# Usar archivo Excel específico
+verificacion-correo --excel-file /path/to/emails.xlsx
+
+# Cambiar tamaño de lote
+verificacion-correo --batch-size 5
+
+# Modo verbose y archivo de log
+verificacion-correo -v --log-file processing.log
+
+# Vista previa sin procesar
+verificacion-correo --dry-run
+
+# Forzar procesamiento incluso con sesión inválida
+verificacion-correo --force
 ```
 
 ### Modo GUI (Interfaz Gráfica)
+
 ```bash
 # Iniciar interfaz gráfica
-python iniciar_gui.py
+verificacion-correo-gui
 ```
 
-## 📦 Builds Automáticos (GitHub Actions)
+La GUI incluye:
+- **📧 Pestaña de Procesamiento**: Control del procesamiento con barra de progreso
+- **🔐 Pestaña de Sesión**: Gestión y estado de la sesión del navegador
+- **⚙️ Pestaña de Configuración**: Información y acciones de configuración
+- **📊 Registro en tiempo real**: Eventos y progreso detallados
 
-El proyecto incluye un workflow de GitHub Actions que automáticamente:
-
-- Compila un ejecutable **Windows standalone** cuando se crea un tag `v*`
-- Cachea dependencias para builds rápidos
-- Publica releases automáticos en GitHub
-- Genera release notes automáticamente
-
-### Crear un Release
-
-Usa el script de release automatizado:
-
-```bash
-# Incrementar versión patch (v1.0.0 → v1.0.1)
-./scripts/release.sh
-
-# Incrementar versión minor (v1.0.0 → v1.1.0)
-./scripts/release.sh minor
-
-# Incrementar versión major (v1.0.0 → v2.0.0)
-./scripts/release.sh major
-
-# Ver comandos sin ejecutar (dry-run)
-./scripts/release.sh --dry-run
-
-# Forzar sin confirmación
-./scripts/release.sh minor --force
-
-# Release con mensaje personalizado
-./scripts/release.sh patch -m "Hotfix crítico"
-```
-
-El script automáticamente:
-1. Calcula la nueva versión semántica
-2. Crea el tag localmente
-3. Sube el tag a GitHub
-4. Dispara el workflow de build
-
-### Opciones del Script de Release
-
-```bash
-./scripts/release.sh [TIPO] [OPCIONES]
-
-Tipos:
-  patch    Incrementa versión patch (por defecto)
-  minor    Incrementa versión minor
-  major    Incrementa versión major
-
-Opciones:
-  --force         No pedir confirmación
-  --dry-run       Mostrar comandos sin ejecutar
-  --allow-dirty   Permitir cambios sin commitear
-  -m, --message   Mensaje personalizado para el tag
-  -h, --help      Mostrar ayuda
-```
-
-## 🏗️ Estructura del Proyecto
+## 📦 Estructura del Proyecto (v2.0)
 
 ```
 verificacion-correo/
-├── .github/workflows/
-│   └── build-windows.yml          # Workflow GitHub Actions
-├── scripts/
-│   └── release.sh                 # Script de release automatizado
-├── app.py                         # Script principal (CLI)
-├── iniciar_gui.py                 # Iniciador de interfaz gráfica
-├── config.py                      # Gestión de configuración
-├── excel_reader.py                # Lectura de datos desde Excel
-├── excel_writer.py                # Escritura de resultados a Excel
-├── browser_automation.py         # Automatización del navegador
-├── contact_extractor.py           # Extracción de información de contacto
-├── copiar_sesion.py               # Gestión de sesiones
-├── gui.py                         # Interfaz gráfica principal
-├── gui_config_manager.py          # Gestión de configuración en GUI
-├── gui_runner.py                  # Ejecución de procesos en GUI
-├── gui_session_manager.py         # Gestión de sesiones en GUI
-├── config.yaml.example            # Plantilla de configuración
-├── requirements.txt               # Dependencias Python
-├── data/                          # Directorio de datos
-│   └── correos.xlsx              # Archivo Excel con emails
-└── state.json                     # Archivo de sesión (ignorado por git)
+├── src/verificacion_correo/           # Paquete principal
+│   ├── __init__.py                     # Inicialización del paquete
+│   ├── __main__.py                     # Entry point CLI
+│   ├── core/                          # Funcionalidades principales
+│   │   ├── config.py                   # Gestión de configuración
+│   │   ├── browser.py                  # Automatización del navegador
+│   │   ├── extractor.py                # Extracción de contactos
+│   │   ├── excel.py                    # Operaciones Excel
+│   │   └── session.py                 # Gestión de sesiones
+│   ├── cli/                           # Interfaz de línea de comandos
+│   │   └── main.py                    # CLI principal
+│   ├── gui/                           # Interfaz gráfica
+│   │   └── main.py                    # GUI principal
+│   └── utils/                         # Utilidades
+│       └── logging.py                  # Configuración de logging
+├── tests/                             # Suite de tests
+│   ├── test_core/                     # Tests de funcionalidad core
+│   └── test_integration/               # Tests de integración
+├── config/                            # Archivos de configuración
+│   └── default.yaml                   # Configuración por defecto
+├── data/                              # Directorio de datos
+│   └── correos.xlsx                   # Archivo Excel con emails
+├── pyproject.toml                      # Configuración moderna del paquete
+├── requirements.txt                    # Dependencias principales
+├── requirements-dev.txt                # Dependencias de desarrollo
+├── README.md                          # Documentación principal
+└── CLAUDE.md                          # Guía para Claude Code
 ```
 
-## 🔍 Información Extraída
+## 🔍 Comandos CLI Detallados
 
-La herramienta extrae la siguiente información de cada contacto:
+### `verificacion-correo process`
+Procesa emails pendientes desde el archivo Excel configurado.
 
-- ✅ Email personal
-- ✅ Teléfono de trabajo
-- ✅ Dirección postal completa
-- ✅ Departamento
-- ✅ Compañía
-- ✅ Ubicación de oficina
-- ✅ Dirección SIP
-- ✅ Token email
-- ⚠️ Nombre completo (limitado por anti-scraping de Microsoft OWA)
+**Opciones:**
+- `--excel-file PATH`: Archivo Excel específico
+- `--batch-size N`: Tamaño de lote (default: 10)
+- `--dry-run`: Vista previa sin ejecutar
+- `--force`: Forzar procesamiento incluso con sesión inválida
 
-## ⚠️ Limitaciones Conocidas
+### `verificacion-correo setup`
+Configura sesión de navegador interactiva.
+Abre una ventana para login manual y guarda el estado.
 
-Microsoft OWA implementa medidas anti-scraping que **previenen la extracción del nombre completo** cuando se detecta automatización. Todos los demás campos se extraen correctamente.
+### `verificacion-correo validate`
+Valida configuración y preparación del sistema:
+- ✅ Archivo de configuración válido
+- ✅ Sesión del navegador activa
+- ✅ Archivo Excel accesible
+- ✅ Emails pendientes disponibles
+
+### `verificacion-correo status`
+Muestra estado actual del sistema:
+- 🌐 Información de la sesión (cookies, orígenes, validez)
+- 📁 Estado del archivo Excel (existencia, tamaño, pendientes)
+- ⚙️ Configuración actual
+
+## 📊 Datos Extraídos
+
+La herramienta extrae exitosamente **8 de 9 campos**:
+
+- ✅ Email personal (ej: `nombre.apellido@madrid.org`)
+- ✅ Teléfono de trabajo (ej: `916704092`)
+- ✅ Dirección completa (ej: `C/ AYUNTAMIENTO, 5 28791 RIVAS-VACIAMADRID`)
+- ✅ Departamento (ej: `OFICINA JUDICIAL MUNICIPAL`)
+- ✅ Compañía (ej: `ORGANOS JUDICIALES`)
+- ✅ Ubicación de oficina (ej: `RIVAS-VACIAMADRID`)
+- ✅ Dirección SIP (ej: `sip:asp164@madrid.org`)
+- ✅ Token de email (para identificación)
+- ⚠️ **Nombre completo** (bloqueado por anti-scraping de Microsoft OWA)
+
+### Limitación del Nombre de Usuario
+
+Microsoft OWA implementa protección anti-bot que específicamente previene la extracción del nombre completo cuando se detecta automatización. Esta es una limitación conocida del lado del servidor y no puede evadirse con técnicas del lado del cliente.
+
+## 🛠️ Desarrollo
+
+### Configuración de Entorno de Desarrollo
+
+```bash
+# Instalar dependencias de desarrollo
+pip install -r requirements-dev.txt
+
+# Instalar en modo edición con dependencias de desarrollo
+pip install -e ".[dev]"
+
+# Formatear código
+black src/ tests/
+
+# Linting
+ruff check src/ tests/
+
+# Type checking
+mypy src/
+
+# Ejecutar tests
+pytest
+
+# Ejecutar tests con cobertura
+pytest --cov=src --cov-report=html
+```
+
+### Scripts Útiles
+
+```bash
+# Validar configuración del paquete
+python -m build --version
+
+# Crear distribución
+python -m build
+
+# Publicar en PyPI (para maintainer)
+python -m twine upload dist/*
+```
+
+## 🔄 Migración desde v1.0
+
+Si vienes de la versión anterior:
+
+1. **Reinstalar paquete**:
+   ```bash
+   pip install -e .
+   ```
+
+2. **Nuevos comandos**:
+   - `python app.py` → `verificacion-correo`
+   - `python copiar_sesion.py` → `verificacion-correo setup`
+   - `python iniciar_gui.py` → `verificacion-correo-gui`
+
+3. **Configuración**:
+   - `config.yaml` sigue siendo compatible
+   - Nuevo `config/default.yaml` es la ubicación preferida
+
+## 🏗️ Builds Automáticos (GitHub Actions)
+
+El proyecto incluye workflows automáticos para:
+- **CI/CD**: Tests en múltiples versiones de Python
+- **Build Windows**: Ejecutable standalone para Windows
+- **Release Automático**: Publicación automática en GitHub Releases
+
+### Crear un Release
+
+```bash
+# Versión patch (v2.0.0 → v2.0.1)
+./scripts/release.sh
+
+# Versión minor (v2.0.0 → v2.1.0)
+./scripts/release.sh minor
+
+# Versión major (v2.0.0 → v3.0.0)
+./scripts/release.sh major
+```
 
 ## 📝 Licencia
 
@@ -193,10 +287,33 @@ Las contribuciones son bienvenidas. Por favor:
 
 Si encuentras algún issue o tienes sugerencias:
 
-- Crea un issue en GitHub
-- Revisa la documentación en `CLAUDE.md`
-- Contacta al maintainer
+- 🐛 Crea un issue en GitHub
+- 📚 Revisa la documentación en `CLAUDE.md`
+- 💬 Contacta al maintainer
 
 ---
 
-**Desarrollado con ❤️ para automatización de procesos de verificación de correos**
+**Desarrollado con ❤️ para automatización moderna de procesos de verificación de correos**
+
+## 📈 Historial de Cambios (v2.0)
+
+### ✨ Nuevas Características
+- **Arquitectura Moderna**: Estructura `src/` con paquetes estándar
+- **CLI Potente**: Múltiples comandos con validación y opciones
+- **GUI Mejorada**: Interfaz más intuitiva y robusta
+- **Logging Estructurado**: Configuración centralizada de logs
+- **Tests**: Suite básica de tests unitarios e integración
+- **Configuración Flexible**: Validación y fallbacks automáticos
+- **Documentación**: README actualizado y guía de desarrollo
+
+### 🔧 Mejoras Técnicas
+- **Type Hints**: Anotaciones de tipo en todo el código
+- **Error Handling**: Manejo robusto de errores
+- **Performance**: Optimización del procesamiento por lotes
+- **Maintenibility**: Código modular y bien documentado
+- **Standards**: Cumplimiento con Python Packaging Authority 2025
+
+### 🔄 Cambios Incompatibles
+- Los comandos CLI han cambiado (ver sección de migración)
+- La ubicación del código fuente ahora está en `src/`
+- Se requiere Python 3.8+ (antes 3.11+)
