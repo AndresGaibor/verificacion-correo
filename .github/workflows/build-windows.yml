@@ -30,6 +30,15 @@ jobs:
             New-Item -ItemType Directory -Path "data" -Force
           }
 
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~\AppData\Local\ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
       - name: Install Python dependencies
         shell: pwsh
         run: |
@@ -38,7 +47,6 @@ jobs:
           pip install pyinstaller
 
       - name: Install Playwright browsers
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           Write-Host "Installing Playwright browsers..."
@@ -67,15 +75,6 @@ jobs:
           }
 
           Write-Host "All required files found"
-
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        id: playwright-cache
-        with:
-          path: ~\AppData\Local\ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-playwright-
 
       - name: Cache PyInstaller build
         uses: actions/cache@v4
