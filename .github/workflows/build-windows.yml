@@ -64,7 +64,7 @@ jobs:
 
           Write-Host ""
           Write-Host "=== Testing Playwright import ==="
-          python -c "import playwright; print('Playwright version:', playwright.__version__)"
+          python -c "import playwright; print('Playwright imported successfully')"
 
       - name: Install Playwright browsers
         shell: pwsh
