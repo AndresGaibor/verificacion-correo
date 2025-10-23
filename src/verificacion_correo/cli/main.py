@@ -101,6 +101,9 @@ Examples:
             help="Configuration file path (default: config/default.yaml)"
         )
 
+        # Add process options to main parser for default command
+        self._add_process_options(parser)
+
         # Create subparsers for commands
         subparsers = parser.add_subparsers(
             title="commands",
@@ -173,14 +176,14 @@ Examples:
         print("=" * 70)
 
         # Override config with command line options
-        if args.excel_file:
+        if hasattr(args, 'excel_file') and args.excel_file:
             self.config.excel.default_file = Path(args.excel_file).absolute()
-        if args.batch_size:
+        if hasattr(args, 'batch_size') and args.batch_size:
             self.config.processing.batch_size = args.batch_size
 
         # Validate setup
         validation = self._validate_setup()
-        if not validation['session_valid'] and not args.force:
+        if not validation['session_valid'] and not getattr(args, 'force', False):
             print("❌ Browser session invalid or expired")
             print("   Run 'verificacion-correo setup' to create a new session")
             return 1
@@ -213,7 +216,7 @@ Examples:
 
         print(f"📦 Organized in {len(summary.batches)} batches of {self.config.processing.batch_size}")
 
-        if args.dry_run:
+        if getattr(args, 'dry_run', False):
             print("\n🔍 DRY RUN MODE - No processing will be performed")
             print("   First 5 pending emails:")
             for i, batch in enumerate(summary.batches[:1]):
