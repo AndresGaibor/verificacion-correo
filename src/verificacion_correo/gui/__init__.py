@@ -5,6 +5,6 @@ This module provides GUI functionality using Tkinter for email verification
 and contact extraction with a user-friendly interface.
 """
 
-from .main import main
+from verificacion_correo.gui.main import main
 
 __all__ = ["main"]

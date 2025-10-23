@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 import logging
 
-from .config import Config
+from verificacion_correo.core.config import Config
 
 
 logger = logging.getLogger(__name__)

@@ -17,8 +17,8 @@ try:
 except ImportError:
     uc = None
 
-from .user_agents import UserAgentRotator, UserAgentConfig
-from ...utils.logging import get_logger
+from verificacion_correo.core.antidetection.user_agents import UserAgentRotator, UserAgentConfig
+from verificacion_correo.utils.logging import get_logger
 
 
 logger = get_logger(__name__)

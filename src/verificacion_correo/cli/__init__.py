@@ -4,6 +4,6 @@ Command Line Interface for verificacion-correo.
 This module provides CLI functionality for email verification and contact extraction.
 """
 
-from .main import main
+from verificacion_correo.cli.main import main
 
 __all__ = ["main"]

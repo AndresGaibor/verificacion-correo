@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 from playwright.sync_api import sync_playwright, Browser, BrowserContext, Page, Playwright
 
-from .config import Config
-from ..utils.logging import get_logger
+from verificacion_correo.core.config import Config
+from verificacion_correo.utils.logging import get_logger
 
 
 logger = get_logger(__name__)

@@ -14,11 +14,11 @@ from pathlib import Path
 from typing import Optional, Dict, Any, Callable
 import yaml
 
-from ..core.config import Config
-from ..core.browser import BrowserAutomation
-from ..core.session import SessionManager, get_session_status
-from ..core.excel import ExcelReader, ExcelWriter
-from ..utils.logging import setup_logging, get_logger
+from verificacion_correo.core.config import Config
+from verificacion_correo.core.browser import BrowserAutomation
+from verificacion_correo.core.session import SessionManager, get_session_status
+from verificacion_correo.core.excel import ExcelReader, ExcelWriter
+from verificacion_correo.utils.logging import setup_logging, get_logger
 
 
 logger = get_logger(__name__)
