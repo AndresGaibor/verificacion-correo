@@ -9,6 +9,7 @@ guiding users through initial configuration.
 import os
 import sys
 import shutil
+import subprocess
 from pathlib import Path
 from typing import Optional, Dict, Any
 import logging
@@ -74,13 +75,18 @@ class FirstRunManager:
             excel_status = self._ensure_excel_file()
             print(f"✅ Archivo Excel: {excel_status}")
 
-            # Step 4: Check session status
-            print("🔐 Paso 4: Verificando sesión del navegador...")
+            # Step 4: Check and install Playwright browsers
+            print("🌐 Paso 4: Verificando navegadores de Playwright...")
+            browser_status = self._check_and_install_playwright_browsers()
+            print(f"📌 Navegadores: {browser_status}")
+
+            # Step 5: Check session status
+            print("🔐 Paso 5: Verificando sesión del navegador...")
             session_status = self._check_session_status()
             print(f"📌 Sesión: {session_status}")
 
-            # Step 5: Create first run marker
-            print("🎯 Paso 5: Finalizando configuración...")
+            # Step 6: Create first run marker
+            print("🎯 Paso 6: Finalizando configuración...")
             self._create_first_run_marker()
             print("✅ Configuración inicial completada")
 
@@ -191,6 +197,54 @@ class FirstRunManager:
         else:
             return f"No existe (esperado en {session_file})"
 
+    def _check_and_install_playwright_browsers(self) -> str:
+        """
+        Check if Playwright browsers are installed and install them if needed.
+
+        Returns:
+            Status message about browser installation
+        """
+        try:
+            # Try to check if Chromium is available
+            from playwright.sync_api import sync_playwright
+
+            try:
+                with sync_playwright() as p:
+                    # Try to get browser executable path
+                    # This will fail if browsers are not installed
+                    browser_path = p.chromium.executable_path
+                    if browser_path and Path(browser_path).exists():
+                        return f"Navegadores ya instalados en {browser_path}"
+            except Exception:
+                # Browsers not installed, need to install
+                pass
+
+            print("📥 Descargando navegadores de Playwright...")
+            print("   Esto puede tomar varios minutos en la primera ejecución.")
+            print("   Por favor, espera...")
+
+            # Install Playwright browsers
+            result = subprocess.run(
+                [sys.executable, "-m", "playwright", "install", "chromium"],
+                capture_output=True,
+                text=True,
+                timeout=300  # 5 minutes timeout
+            )
+
+            if result.returncode == 0:
+                print("✅ Navegadores instalados exitosamente")
+                return "Navegadores instalados exitosamente"
+            else:
+                error_msg = result.stderr or result.stdout
+                logger.warning(f"Failed to install browsers: {error_msg}")
+                return f"Error al instalar navegadores: {error_msg[:100]}"
+
+        except subprocess.TimeoutExpired:
+            return "Timeout al descargar navegadores (toma más de 5 minutos)"
+        except Exception as e:
+            logger.error(f"Error checking/installing browsers: {e}")
+            return f"Error: {e}"
+
     def _create_first_run_marker(self):
         """Create marker file to indicate first run completed."""
         try:
@@ -292,3 +346,58 @@ def get_first_run_instructions() -> str:
     """
 
     return instructions.strip()
+
+
+def ensure_playwright_browsers_installed() -> bool:
+    """
+    Ensure Playwright browsers are installed, installing them if necessary.
+
+    This function can be called from anywhere to ensure browsers are available.
+
+    Returns:
+        True if browsers are installed or successfully installed, False otherwise
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+
+        # First check if browsers are already installed
+        try:
+            with sync_playwright() as p:
+                browser_path = p.chromium.executable_path
+                if browser_path and Path(browser_path).exists():
+                    logger.info(f"Playwright browsers already installed at {browser_path}")
+                    return True
+        except Exception:
+            # Browsers not installed, proceed to install
+            pass
+
+        # Install browsers
+        logger.info("Installing Playwright browsers...")
+        print("📥 Descargando navegadores de Playwright (primera vez)...")
+        print("   Esto puede tomar varios minutos. Por favor, espera...")
+
+        result = subprocess.run(
+            [sys.executable, "-m", "playwright", "install", "chromium"],
+            capture_output=True,
+            text=True,
+            timeout=300  # 5 minutes
+        )
+
+        if result.returncode == 0:
+            logger.info("Playwright browsers installed successfully")
+            print("✅ Navegadores instalados exitosamente")
+            return True
+        else:
+            error_msg = result.stderr or result.stdout
+            logger.error(f"Failed to install Playwright browsers: {error_msg}")
+            print(f"❌ Error al instalar navegadores: {error_msg[:200]}")
+            return False
+
+    except subprocess.TimeoutExpired:
+        logger.error("Timeout installing Playwright browsers")
+        print("❌ Timeout al descargar navegadores (más de 5 minutos)")
+        return False
+    except Exception as e:
+        logger.error(f"Error ensuring Playwright browsers: {e}")
+        print(f"❌ Error al verificar navegadores: {e}")
+        return False

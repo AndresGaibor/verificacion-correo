@@ -150,8 +150,31 @@ class SessionManager:
                 )
                 logger.debug("Browser launched successfully")
             except Exception as e:
-                logger.error(f"Failed to launch browser: {e}", exc_info=True)
-                raise
+                # Check if error is due to missing browser executable
+                error_str = str(e)
+                if "Executable doesn't exist" in error_str or "playwright install" in error_str.lower():
+                    logger.warning("Playwright browsers not installed, attempting auto-installation...")
+                    print("\n⚠️ Navegadores de Playwright no encontrados.")
+
+                    # Try to install browsers
+                    from verificacion_correo.core.first_run import ensure_playwright_browsers_installed
+                    if ensure_playwright_browsers_installed():
+                        # Retry browser launch after installation
+                        logger.info("Retrying browser launch after installation...")
+                        print("🔄 Reintentando abrir navegador...")
+                        self._browser = self._playwright.chromium.launch(
+                            headless=self.config.browser.headless
+                        )
+                        logger.debug("Browser launched successfully after auto-installation")
+                    else:
+                        logger.error("Failed to auto-install browsers")
+                        raise Exception(
+                            "No se pudieron instalar los navegadores automáticamente. "
+                            "Por favor ejecuta: playwright install chromium"
+                        )
+                else:
+                    logger.error(f"Failed to launch browser: {e}", exc_info=True)
+                    raise
 
             # Create context with saved session state
             try:
