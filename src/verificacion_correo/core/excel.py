@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from openpyxl import load_workbook, Workbook
 from openpyxl.utils import get_column_letter
 
-from ..utils.logging import get_logger
+from verificacion_correo.utils.logging import get_logger
 
 
 logger = get_logger(__name__)

@@ -9,11 +9,11 @@ This module contains the main automation logic:
 - session: Browser session management
 """
 
-from .config import Config
-from .browser import BrowserAutomation
-from .extractor import ContactExtractor
-from .excel import ExcelReader, ExcelWriter
-from .session import SessionManager
+from verificacion_correo.core.config import Config
+from verificacion_correo.core.browser import BrowserAutomation
+from verificacion_correo.core.extractor import ContactExtractor
+from verificacion_correo.core.excel import ExcelReader, ExcelWriter
+from verificacion_correo.core.session import SessionManager
 
 __all__ = [
     "Config",

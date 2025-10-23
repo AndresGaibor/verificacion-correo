@@ -22,10 +22,10 @@ try:
 except ImportError:
     uc = None
 
-from .config import Config
-from .extractor import ContactExtractor
-from .excel import ExcelReader, ExcelWriter, EmailRecord, ProcessingStatus
-from .antidetection import (
+from verificacion_correo.core.config import Config
+from verificacion_correo.core.extractor import ContactExtractor
+from verificacion_correo.core.excel import ExcelReader, ExcelWriter, EmailRecord, ProcessingStatus
+from verificacion_correo.core.antidetection import (
     NoDriverManager,
     MouseEmulator,
     TypingSimulator,
@@ -36,8 +36,8 @@ from .antidetection import (
     TypingConfig,
     UserAgentConfig,
 )
-from .antidetection.nodriver_manager import NoDriverConfig
-from ..utils.logging import get_logger
+from verificacion_correo.core.antidetection.nodriver_manager import NoDriverConfig
+from verificacion_correo.utils.logging import get_logger
 
 
 logger = get_logger(__name__)

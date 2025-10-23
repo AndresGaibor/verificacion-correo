@@ -10,11 +10,11 @@ from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 from playwright.sync_api import sync_playwright, Page, TimeoutError as PWTimeout
 
-from .config import Config
-from .extractor import ContactExtractor
-from .session import SessionManager
-from .excel import ExcelReader, ExcelWriter, EmailRecord, ProcessingStatus
-from ..utils.logging import get_logger
+from verificacion_correo.core.config import Config
+from verificacion_correo.core.extractor import ContactExtractor
+from verificacion_correo.core.session import SessionManager
+from verificacion_correo.core.excel import ExcelReader, ExcelWriter, EmailRecord, ProcessingStatus
+from verificacion_correo.utils.logging import get_logger
 
 
 logger = get_logger(__name__)

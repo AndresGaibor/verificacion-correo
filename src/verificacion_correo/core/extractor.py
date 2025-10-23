@@ -11,8 +11,8 @@ from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
 from playwright.sync_api import Page, Locator, TimeoutError as PWTimeout
 
-from .config import Config
-from ..utils.logging import get_logger
+from verificacion_correo.core.config import Config
+from verificacion_correo.utils.logging import get_logger
 
 
 logger = get_logger(__name__)

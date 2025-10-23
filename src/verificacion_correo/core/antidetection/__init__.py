@@ -15,11 +15,11 @@ contact information, particularly the name field which is typically
 blocked by OWA's anti-scraping measures.
 """
 
-from .delays import human_delay, DelayManager, DelayConfig
-from .user_agents import UserAgentRotator, UserAgentConfig
-from .typing_simulator import TypingSimulator, TypingConfig
-from .mouse_emulator import MouseEmulator, MouseConfig
-from .nodriver_manager import NoDriverManager, NoDriverConfig
+from verificacion_correo.core.antidetection.delays import human_delay, DelayManager, DelayConfig
+from verificacion_correo.core.antidetection.user_agents import UserAgentRotator, UserAgentConfig
+from verificacion_correo.core.antidetection.typing_simulator import TypingSimulator, TypingConfig
+from verificacion_correo.core.antidetection.mouse_emulator import MouseEmulator, MouseConfig
+from verificacion_correo.core.antidetection.nodriver_manager import NoDriverManager, NoDriverConfig
 
 __all__ = [
     'human_delay',

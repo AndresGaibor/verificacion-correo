@@ -10,12 +10,12 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from ..core.config import get_config, Config
-from ..core.first_run import check_and_run_first_time_setup
-from ..core.browser import BrowserAutomation, process_emails
-from ..core.session import setup_session_interactive, validate_saved_session, get_session_status
-from ..core.excel import ExcelReader
-from ..utils.logging import setup_logging, get_logger
+from verificacion_correo.core.config import get_config, Config
+from verificacion_correo.core.first_run import check_and_run_first_time_setup
+from verificacion_correo.core.browser import BrowserAutomation, process_emails
+from verificacion_correo.core.session import setup_session_interactive, validate_saved_session, get_session_status
+from verificacion_correo.core.excel import ExcelReader
+from verificacion_correo.utils.logging import setup_logging, get_logger
 
 
 logger = get_logger(__name__)
