@@ -15,9 +15,10 @@ __version__ = "1.0.0"
 __author__ = "Andres Gaibor"
 __email__ = "andres@example.com"
 
-from .core import config, browser, extractor, excel, session
-from .cli import main as cli_main
-from .gui import main as gui_main
+# Use absolute imports to avoid PyInstaller issues
+from verificacion_correo.core import config, browser, extractor, excel, session
+from verificacion_correo.cli import main as cli_main
+from verificacion_correo.gui import main as gui_main
 
 __all__ = [
     "config",

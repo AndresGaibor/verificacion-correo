@@ -12,7 +12,8 @@ from pathlib import Path
 if Path(__file__).parent.parent.name == "src":
     sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from .cli.main import main
+# Use absolute import instead of relative to avoid PyInstaller issues
+from verificacion_correo.cli.main import main
 
 if __name__ == "__main__":
     sys.exit(main())

@@ -48,6 +48,25 @@ def test_pyinstaller_build():
         print("❌ Error: src directory not found.")
         return False
 
+    # Check if running in virtual environment
+    if not hasattr(sys, 'real_prefix') and not (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix):
+        print("⚠️ Warning: Not running in a virtual environment")
+        venv_path = Path(".venv")
+        if venv_path.exists():
+            print(f"❌ Please activate the virtual environment first:")
+            if os.name == "nt":
+                print(f"   .venv\\Scripts\\activate")
+            else:
+                print(f"   source .venv/bin/activate")
+            print(f"   Then run: python build_test.py")
+            return False
+        else:
+            print("❌ No virtual environment found. Please create one:")
+            print("   python -m venv .venv")
+            print("   source .venv/bin/activate  # On Windows: .venv\\Scripts\\activate")
+            print("   pip install -r requirements.txt")
+            return False
+
     # Clean previous builds
     print("\n🧹 Cleaning previous builds...")
     for build_dir in ["build", "dist", "*.spec"]:
@@ -56,25 +75,32 @@ def test_pyinstaller_build():
                 shutil.rmtree(path)
                 print(f"   Removed: {path}")
 
+    # Use sys.executable to ensure we use the correct Python/pip
+    python_exe = sys.executable
+    pip_cmd = f'"{python_exe}" -m pip'
+
     # Install dependencies
-    if not run_command("pip install -r requirements.txt", "Installing dependencies"):
+    if not run_command(f"{pip_cmd} install -r requirements.txt", "Installing dependencies"):
         return False
 
     # Install PyInstaller
-    if not run_command("pip install pyinstaller", "Installing PyInstaller"):
+    if not run_command(f"{pip_cmd} install pyinstaller", "Installing PyInstaller"):
         return False
 
     # Install Playwright browsers
-    if not run_command("playwright install chromium", "Installing Playwright browsers"):
+    if not run_command(f'"{python_exe}" -m playwright install chromium', "Installing Playwright browsers"):
         return False
 
     # Build with PyInstaller (onefile)
-    pyinstaller_cmd = '''pyinstaller --onefile \\
+    # Use correct separator for --add-data (: on Unix, ; on Windows)
+    separator = ";" if os.name == "nt" else ":"
+    pyinstaller_cmd = f'''"{python_exe}" -m PyInstaller --onefile \\
+        --name verificacion_correo \\
         --collect-all playwright \\
         --collect-all openpyxl \\
         --collect-all yaml \\
-        --add-data "config.yaml.example;." \\
-        --add-data "data/correos_template.xlsx;data" \\
+        --add-data "config.yaml.example{separator}." \\
+        --add-data "data/correos_template.xlsx{separator}data" \\
         --hidden-import tkinter \\
         --hidden-import tkinter.ttk \\
         --hidden-import tkinter.scrolledtext \\
