@@ -11,27 +11,6 @@ excel:
   email_column: 1
 processing:
   batch_size: 10
-antidetection:
-  enabled: false
-  use_nodriver: false
-  mouse_emulation: true
-  human_typing: true
-  random_delays: true
-  user_agent_rotation: true
-  mouse_bezier_curves: true
-  mouse_random_offset_px: 10
-  mouse_move_duration_ms_min: 500
-  mouse_move_duration_ms_max: 1500
-  typing_chars_per_second_min: 2.0
-  typing_chars_per_second_max: 6.0
-  typing_mistake_probability: 0.02
-  delay_between_actions_min: 500
-  delay_between_actions_max: 2000
-  delay_between_emails_min: 3000
-  delay_between_emails_max: 8000
-  ua_rotate: true
-  ua_pool_size: 10
-  ua_prefer_platform: null
 selectors:
   new_message_btn: button[title="Escribir un mensaje nuevo (N)"]
   to_field_role: textbox
