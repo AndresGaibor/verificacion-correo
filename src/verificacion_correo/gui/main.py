@@ -73,8 +73,24 @@ class GUIService:
 
         def processing_thread():
             try:
-                automation = BrowserAutomation(self.config)
-                stats = automation.process_emails(excel_path)
+                # Detect which automation engine to use based on config
+                if self.config.antidetection.enabled and self.config.antidetection.use_nodriver:
+                    # Use NoDriver with anti-detection
+                    try:
+                        from ..core.browser_nodriver import process_emails_nodriver
+                        logger.info("Using NoDriver automation engine with anti-detection enabled")
+                        stats = process_emails_nodriver(self.config)
+                    except ImportError as e:
+                        # NoDriver not installed, fall back to standard Playwright
+                        logger.warning(f"NoDriver not available ({e}), falling back to standard Playwright")
+                        logger.warning("To use anti-detection, install: pip install nodriver python-ghost-cursor")
+                        automation = BrowserAutomation(self.config)
+                        stats = automation.process_emails(excel_path)
+                else:
+                    # Use standard Playwright automation
+                    logger.info("Using standard Playwright automation engine")
+                    automation = BrowserAutomation(self.config)
+                    stats = automation.process_emails(excel_path)
 
                 # Send completion signal
                 self.progress_queue.put(('complete', stats))
@@ -174,6 +190,15 @@ class VerificacionCorreosGUI:
 
         self.summary_text = tk.StringVar(value="Cargando información...")
         ttk.Label(summary_frame, textvariable=self.summary_text, wraplength=600).pack()
+
+        # Automation engine indicator
+        engine_info = self._get_automation_engine_info()
+        self.engine_label = ttk.Label(
+            summary_frame,
+            text=engine_info,
+            foreground='blue' if 'NoDriver' in engine_info else 'gray'
+        )
+        self.engine_label.pack(pady=(5, 0))
 
         # Control buttons
         control_frame = ttk.Frame(main_frame)
@@ -526,6 +551,18 @@ class VerificacionCorreosGUI:
         # Schedule next check
         self.root.after(100, self._check_progress)
 
+    def _get_automation_engine_info(self) -> str:
+        """Get information about the automation engine being used."""
+        if self.config.antidetection.enabled and self.config.antidetection.use_nodriver:
+            # Check if NoDriver is actually installed
+            try:
+                import nodriver
+                return "🤖 Motor: NoDriver (Anti-Detección Activada) ✅"
+            except ImportError:
+                return "⚠️ Motor: Playwright (NoDriver no instalado - instalar con: pip install nodriver)"
+        else:
+            return "🤖 Motor: Playwright Estándar"
+
     def _select_excel_file(self):
         """Select Excel file dialog."""
         file_path = filedialog.askopenfilename(
@@ -689,14 +726,43 @@ Resultados guardados en: {self.excel_path_var.get()}"""
     def _check_session_status(self):
         """Check and display session status."""
         try:
-            status = self.service.validate_session()
-            status_text = f"Archivo: {status.get('file_path', 'N/A')}\n"
-            status_text += f"Existe: {'Sí' if status.get('exists') else 'No'}\n"
-            status_text += f"Válida: {'Sí' if status.get('is_valid') else 'No'}\n"
+            from pathlib import Path
+            import json
 
-            if status.get('exists'):
-                status_text += f"Cookies: {status.get('cookies_count', 0)}\n"
-                status_text += f"Orígenes: {status.get('origins_count', 0)}"
+            # Check which session file to use based on configuration
+            use_nodriver = (self.config.antidetection.enabled and
+                           self.config.antidetection.use_nodriver)
+
+            if use_nodriver:
+                # Check NoDriver session
+                session_file = Path("nodriver_state.json")
+                session_type = "NoDriver (Chrome)"
+            else:
+                # Check Playwright session
+                session_file = Path(self.config.get_session_file_path())
+                session_type = "Playwright (Chromium)"
+
+            status_text = f"Tipo: {session_type}\n"
+            status_text += f"Archivo: {session_file}\n"
+            status_text += f"Existe: {'Sí' if session_file.exists() else 'No'}\n"
+
+            if session_file.exists():
+                try:
+                    with open(session_file, 'r') as f:
+                        session_data = json.load(f)
+
+                    cookies_count = len(session_data.get('cookies', []))
+                    status_text += f"Válida: Sí\n"
+                    status_text += f"Cookies: {cookies_count}\n"
+
+                    if 'origins' in session_data:
+                        status_text += f"Orígenes: {len(session_data.get('origins', []))}"
+                except:
+                    status_text += f"Válida: Error al leer"
+            else:
+                status_text += f"Válida: No\n"
+                status_text += f"\n⚠️ Sesión no encontrada\n"
+                status_text += f"Usa 'Configurar Sesión' para crear una"
 
             self.session_status_text.set(status_text)
 
@@ -711,62 +777,315 @@ Resultados guardados en: {self.excel_path_var.get()}"""
 
     def _setup_session(self):
         """Set up browser session."""
+        # Check if NoDriver is enabled
+        use_nodriver = (self.config.antidetection.enabled and
+                       self.config.antidetection.use_nodriver)
+
+        browser_type = "Chrome con NoDriver (Anti-Detección)" if use_nodriver else "Chromium con Playwright"
+        session_file = "nodriver_state.json" if use_nodriver else "state.json"
+
         if not messagebox.askyesno(
             "Configurar Sesión",
-            "Se abrirá una ventana del navegador para que inicie sesión manualmente.\n"
-            "Después de iniciar sesión, vuelve a esta ventana y presiona OK.\n\n"
+            f"Se abrirá {browser_type} para que inicie sesión manualmente.\n"
+            f"La sesión se guardará en: {session_file}\n\n"
+            "Después de iniciar sesión, vuelve a esta ventana.\n\n"
             "¿Desea continuar?"
         ):
             return
 
         try:
-            # Run session setup in a separate thread to avoid blocking GUI
-            import threading
-
-            def setup_in_background():
-                try:
-                    success = self.service.setup_session()
-                    if success:
-                        # Show success message in main thread
-                        self.root.after(0, lambda: messagebox.showinfo(
-                            "Éxito",
-                            "Sesión configurada correctamente.\n\n"
-                            "La sesión ha sido guardada y puedes comenzar a procesar correos."
-                        ))
-                    else:
-                        # Show error message in main thread
-                        self.root.after(0, lambda: messagebox.showerror(
-                            "Error",
-                            "No se pudo configurar la sesión.\n\n"
-                            "Asegúrate de iniciar sesión correctamente antes de guardar."
-                        ))
-
-                    # Update session status in main thread
-                    self.root.after(0, self._check_session_status)
-
-                except Exception as e:
-                    # Show error message in main thread
-                    self.root.after(0, lambda: messagebox.showerror(
-                        "Error",
-                        f"Error durante la configuración de sesión: {e}"
-                    ))
-
-            # Start background thread
-            setup_thread = threading.Thread(target=setup_in_background, daemon=True)
-            setup_thread.start()
-
-            # Show info message about what will happen
-            messagebox.showinfo(
-                "Configuración en Progreso",
-                "Se está abriendo una ventana del navegador...\n\n"
-                "1. Inicia sesión con tus credenciales\n"
-                "2. Navega a tu bandeja de entrada\n"
-                "3. Vuelve a esta ventana y presiona ENTER en la terminal\n"
-                "4. La sesión se guardará automáticamente"
-            )
+            if use_nodriver:
+                # Use NoDriver session setup
+                self._setup_nodriver_session()
+            else:
+                # Use Playwright session setup
+                self._setup_playwright_session()
 
         except Exception as e:
             messagebox.showerror("Error", f"Error al iniciar configuración de sesión: {e}")
+
+    def _setup_playwright_session(self):
+        """Set up Playwright (Chromium) session."""
+        import threading
+
+        def setup_in_background():
+            try:
+                success = self.service.setup_session()
+                if success:
+                    self.root.after(0, lambda: messagebox.showinfo(
+                        "Éxito",
+                        "Sesión de Playwright configurada correctamente.\n\n"
+                        "La sesión ha sido guardada en state.json"
+                    ))
+                else:
+                    self.root.after(0, lambda: messagebox.showerror(
+                        "Error",
+                        "No se pudo configurar la sesión.\n\n"
+                        "Asegúrate de iniciar sesión correctamente antes de guardar."
+                    ))
+
+                self.root.after(0, self._check_session_status)
+
+            except Exception as e:
+                self.root.after(0, lambda: messagebox.showerror(
+                    "Error",
+                    f"Error durante la configuración de sesión: {e}"
+                ))
+
+        setup_thread = threading.Thread(target=setup_in_background, daemon=True)
+        setup_thread.start()
+
+        messagebox.showinfo(
+            "Configuración en Progreso",
+            "Se está abriendo Chromium...\n\n"
+            "1. Inicia sesión con tus credenciales\n"
+            "2. Navega a tu bandeja de entrada\n"
+            "3. Vuelve a esta ventana y presiona ENTER en la terminal\n"
+            "4. La sesión se guardará automáticamente"
+        )
+
+    def _setup_nodriver_session(self):
+        """Set up NoDriver (Chrome) session integrated in GUI."""
+        import threading
+        import asyncio
+
+        # Show initial instructions
+        messagebox.showinfo(
+            "Configuración NoDriver",
+            "Chrome se abrirá con anti-detección activada.\n\n"
+            "PASOS A SEGUIR:\n"
+            "1. Inicia sesión en OWA manualmente\n"
+            "2. Espera a ver tu bandeja de entrada\n"
+            "3. Vuelve a esta ventana y haz clic en OK\n\n"
+            "El navegador permanecerá abierto hasta 10 minutos."
+        )
+
+        # Create a simple dialog for user confirmation
+        def setup_in_background():
+            try:
+                # Run NoDriver setup
+                async def run_setup():
+                    try:
+                        import nodriver as uc
+                    except ImportError:
+                        self.root.after(0, lambda: messagebox.showerror(
+                            "Error",
+                            "NoDriver no está instalado.\n\n"
+                            "Instala con: pip install nodriver"
+                        ))
+                        return False
+
+                    from pathlib import Path
+                    import json
+
+                    owa_url = self.config.page_url
+                    session_file = Path("nodriver_state.json")
+
+                    try:
+                        # Start NoDriver browser
+                        logger.info("Starting NoDriver for session setup...")
+                        browser = await uc.start(
+                            headless=False,
+                            browser_args=[
+                                '--lang=es-ES',
+                                '--accept-lang=es-ES',
+                            ]
+                        )
+
+                        page = browser.main_tab
+                        if not page:
+                            page = await browser.get("about:blank")
+
+                        # Navigate to OWA
+                        logger.info(f"Navigating to {owa_url}...")
+                        await page.get(owa_url)
+                        await asyncio.sleep(3)
+
+                        # Show dialog to confirm login
+                        self.root.after(0, lambda: self._show_login_confirmation_dialog(browser, page, session_file))
+
+                        return True
+
+                    except Exception as e:
+                        logger.error(f"Error setting up NoDriver: {e}")
+                        self.root.after(0, lambda: messagebox.showerror(
+                            "Error",
+                            f"Error al configurar NoDriver:\n{str(e)}"
+                        ))
+                        return False
+
+                # Run async setup
+                asyncio.run(run_setup())
+
+            except Exception as e:
+                logger.error(f"Error in setup thread: {e}")
+                self.root.after(0, lambda: messagebox.showerror(
+                    "Error",
+                    f"Error durante configuración:\n{str(e)}"
+                ))
+
+        # Start setup in background thread
+        setup_thread = threading.Thread(target=setup_in_background, daemon=True)
+        setup_thread.start()
+
+    def _show_login_confirmation_dialog(self, browser, page, session_file):
+        """Show dialog to confirm user has logged in."""
+        import asyncio
+        import json
+        from pathlib import Path
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Esperando inicio de sesión")
+        dialog.geometry("500x250")
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        # Center dialog
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (dialog.winfo_width() // 2)
+        y = (dialog.winfo_screenheight() // 2) - (dialog.winfo_height() // 2)
+        dialog.geometry(f"+{x}+{y}")
+
+        # Instructions
+        ttk.Label(
+            dialog,
+            text="Chrome está abierto en otra ventana",
+            font=('Arial', 12, 'bold')
+        ).pack(pady=10)
+
+        instructions = """
+Por favor, completa estos pasos en Chrome:
+
+1. Inicia sesión con tus credenciales
+2. Espera a ver tu bandeja de entrada de OWA
+3. Vuelve aquí y haz clic en "He Iniciado Sesión"
+
+El navegador se cerrará automáticamente después de guardar la sesión.
+        """
+        ttk.Label(
+            dialog,
+            text=instructions.strip(),
+            justify=tk.LEFT,
+            wraplength=450
+        ).pack(pady=10, padx=20)
+
+        # Buttons frame
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(pady=20)
+
+        def on_confirm():
+            """User confirmed they logged in - save session."""
+            dialog.destroy()
+
+            async def save_session():
+                try:
+                    # Get current URL for logging
+                    current_url = page.url
+                    logger.info(f"Saving session from URL: {current_url}")
+
+                    # Get cookies (don't verify URL - trust the user clicked when ready)
+                    import nodriver.cdp.network as cdp_network
+                    cookies_result = await page.send(cdp_network.get_all_cookies())
+                    cookies = cookies_result.cookies if hasattr(cookies_result, 'cookies') else []
+
+                    # Save session
+                    session_data = {
+                        'cookies': [
+                            {
+                                'name': c.name,
+                                'value': c.value,
+                                'domain': c.domain,
+                                'path': c.path,
+                                'secure': c.secure if hasattr(c, 'secure') else False,
+                                'httpOnly': c.http_only if hasattr(c, 'http_only') else False,
+                                'sameSite': str(c.same_site) if hasattr(c, 'same_site') else 'None',
+                                'expires': c.expires if hasattr(c, 'expires') else -1,
+                            }
+                            for c in cookies
+                        ],
+                        'url': current_url,
+                        'timestamp': str(asyncio.get_event_loop().time())
+                    }
+
+                    with open(session_file, 'w', encoding='utf-8') as f:
+                        json.dump(session_data, f, indent=2)
+
+                    logger.info(f"NoDriver session saved: {len(session_data['cookies'])} cookies")
+
+                    # Show success message BEFORE closing browser
+                    cookies_count = len(session_data['cookies'])
+                    self.root.after(0, lambda count=cookies_count: messagebox.showinfo(
+                        "Éxito",
+                        f"Sesión de NoDriver guardada correctamente.\n\n"
+                        f"Archivo: {session_file}\n"
+                        f"Cookies: {count}\n\n"
+                        "Ahora puedes procesar correos con anti-detección activada."
+                    ))
+
+                    # Update session status
+                    self.root.after(0, self._check_session_status)
+
+                    # Close browser (don't await if it returns None)
+                    try:
+                        # NoDriver's browser.stop() might be synchronous
+                        browser.stop()
+                    except Exception as close_err:
+                        logger.debug(f"Error closing browser: {close_err}")
+
+                    return True
+
+                except Exception as e:
+                    error_msg = str(e)
+                    logger.error(f"Error saving session: {error_msg}")
+                    self.root.after(0, lambda msg=error_msg: messagebox.showerror(
+                        "Error",
+                        f"Error al guardar sesión:\n{msg}"
+                    ))
+                    try:
+                        browser.stop()
+                    except:
+                        pass
+                    return False
+
+            # Run save in background
+            def save_in_thread():
+                asyncio.run(save_session())
+
+            threading.Thread(target=save_in_thread, daemon=True).start()
+
+        def on_cancel():
+            """User cancelled - close browser."""
+            dialog.destroy()
+
+            async def close_browser():
+                try:
+                    browser.stop()
+                except:
+                    pass
+
+            def close_in_thread():
+                asyncio.run(close_browser())
+
+            threading.Thread(target=close_in_thread, daemon=True).start()
+
+            messagebox.showinfo(
+                "Cancelado",
+                "Configuración de sesión cancelada.\n"
+                "El navegador se cerrará."
+            )
+
+        ttk.Button(
+            btn_frame,
+            text="✅ He Iniciado Sesión",
+            command=on_confirm,
+            style='Accent.TButton'
+        ).pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(
+            btn_frame,
+            text="❌ Cancelar",
+            command=on_cancel
+        ).pack(side=tk.LEFT, padx=5)
 
     def _delete_session(self):
         """Delete browser session."""

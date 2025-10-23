@@ -15,17 +15,22 @@ contact information, particularly the name field which is typically
 blocked by OWA's anti-scraping measures.
 """
 
-from .delays import human_delay, DelayManager
-from .user_agents import UserAgentRotator
-from .typing_simulator import TypingSimulator
-from .mouse_emulator import MouseEmulator
-from .nodriver_manager import NoDriverManager
+from .delays import human_delay, DelayManager, DelayConfig
+from .user_agents import UserAgentRotator, UserAgentConfig
+from .typing_simulator import TypingSimulator, TypingConfig
+from .mouse_emulator import MouseEmulator, MouseConfig
+from .nodriver_manager import NoDriverManager, NoDriverConfig
 
 __all__ = [
     'human_delay',
     'DelayManager',
+    'DelayConfig',
     'UserAgentRotator',
+    'UserAgentConfig',
     'TypingSimulator',
+    'TypingConfig',
     'MouseEmulator',
+    'MouseConfig',
     'NoDriverManager',
+    'NoDriverConfig',
 ]
