@@ -113,9 +113,18 @@ class NoDriverManager:
             await self._apply_stealth_scripts()
 
             # Load session if provided
-            if session_file and Path(session_file).exists():
+            # Try NoDriver-specific session first, then fall back to Playwright session
+            nodriver_session = session_file.replace('state.json', 'nodriver_state.json') if session_file else None
+
+            if nodriver_session and Path(nodriver_session).exists():
+                logger.info(f"Using NoDriver-specific session: {nodriver_session}")
+                await self._load_session(nodriver_session)
+                logger.info("NoDriver session loaded successfully")
+            elif session_file and Path(session_file).exists():
+                logger.warning(f"NoDriver session not found, falling back to Playwright session: {session_file}")
+                logger.warning("This may not work correctly. Run: python setup_nodriver_session.py")
                 await self._load_session(session_file)
-                logger.info("Session loaded successfully")
+                logger.info("Playwright session loaded (may have compatibility issues)")
 
             logger.info("NoDriver browser started successfully")
             return self.browser
@@ -286,20 +295,24 @@ class NoDriverManager:
             with open(session_file, 'r') as f:
                 session_data = json.load(f)
 
-            # Load cookies
+            # Load cookies using CDP
             if 'cookies' in session_data:
+                import nodriver.cdp.network as cdp_network
                 for cookie in session_data['cookies']:
-                    # NoDriver cookie format might differ, adapt as needed
-                    await self.page.send(
-                        'Network.setCookie',
-                        name=cookie.get('name', ''),
-                        value=cookie.get('value', ''),
-                        domain=cookie.get('domain', ''),
-                        path=cookie.get('path', '/'),
-                        secure=cookie.get('secure', False),
-                        httpOnly=cookie.get('httpOnly', False),
-                        sameSite=cookie.get('sameSite', 'None'),
-                    )
+                    # Convert Playwright cookie format to CDP format
+                    try:
+                        await self.page.send(cdp_network.set_cookie(
+                            name=cookie.get('name', ''),
+                            value=cookie.get('value', ''),
+                            domain=cookie.get('domain', ''),
+                            path=cookie.get('path', '/'),
+                            secure=cookie.get('secure', False),
+                            http_only=cookie.get('httpOnly', False),
+                            same_site=cdp_network.CookieSameSite(cookie.get('sameSite', 'None').lower()) if cookie.get('sameSite') else None,
+                        ))
+                    except Exception as cookie_err:
+                        logger.debug(f"Failed to set cookie {cookie.get('name')}: {cookie_err}")
+                        continue
 
             # Load localStorage (if available in session)
             if 'origins' in session_data:
