@@ -168,6 +168,11 @@ Examples:
             action="store_true",
             help="Force processing even if session validation fails"
         )
+        parser.add_argument(
+            "--keep-draft",
+            action="store_true",
+            help="Keep draft message instead of discarding it (overrides config)"
+        )
 
     def _cmd_process(self, args):
         """Process pending emails command."""
@@ -180,6 +185,8 @@ Examples:
             self.config.excel.default_file = Path(args.excel_file).absolute()
         if hasattr(args, 'batch_size') and args.batch_size:
             self.config.processing.batch_size = args.batch_size
+        if hasattr(args, 'keep_draft') and args.keep_draft:
+            self.config.processing.discard_draft = False
 
         # Validate setup
         validation = self._validate_setup()

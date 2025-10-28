@@ -377,6 +377,10 @@ class VerificacionCorreosGUI:
         self.headless_var = tk.BooleanVar(value=self.config.browser.headless)
         ttk.Checkbutton(browser_frame, text="Modo sin ventana (headless)", variable=self.headless_var).pack(anchor='w', padx=5, pady=5)
 
+        # Discard draft option
+        self.discard_draft_var = tk.BooleanVar(value=self.config.processing.discard_draft)
+        ttk.Checkbutton(browser_frame, text="Descartar borrador automáticamente", variable=self.discard_draft_var).pack(anchor='w', padx=5, pady=5)
+
         # Session file
         ttk.Label(browser_frame, text="Archivo de sesión:").pack(anchor='w', padx=5, pady=(10, 0))
         session_frame = ttk.Frame(browser_frame)
@@ -428,6 +432,7 @@ class VerificacionCorreosGUI:
             # Update configuration object
             self.config.page_url = self.owa_url_var.get()
             self.config.processing.batch_size = self.batch_size_var.get()
+            self.config.processing.discard_draft = self.discard_draft_var.get()
             self.config.excel.default_file = self.excel_file_var.get()
             self.config.browser.headless = self.headless_var.get()
             self.config.browser.session_file = self.session_file_var.get()
@@ -460,7 +465,8 @@ class VerificacionCorreosGUI:
                 'email_column': self.config.excel.email_column
             },
             'processing': {
-                'batch_size': self.config.processing.batch_size
+                'batch_size': self.config.processing.batch_size,
+                'discard_draft': self.config.processing.discard_draft
             },
             'selectors': {
                 'new_message_btn': self.config.selectors.new_message_btn,
@@ -1179,7 +1185,8 @@ La aplicación está lista para usar. Puedes:
                     'email_column': self.config.excel.email_column
                 },
                 'processing': {
-                    'batch_size': self.config.processing.batch_size
+                    'batch_size': self.config.processing.batch_size,
+                    'discard_draft': self.config.processing.discard_draft
                 },
                 'selectors': {
                     'new_message_btn': self.config.selectors.new_message_btn,

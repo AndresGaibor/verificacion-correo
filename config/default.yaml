@@ -11,6 +11,7 @@ excel:
   email_column: 1
 processing:
   batch_size: 10
+  discard_draft: true
 selectors:
   new_message_btn: button[title="Escribir un mensaje nuevo (N)"]
   to_field_role: textbox

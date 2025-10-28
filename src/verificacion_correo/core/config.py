@@ -44,6 +44,7 @@ class ExcelConfig:
 class ProcessingConfig:
     """Processing configuration."""
     batch_size: int = 10
+    discard_draft: bool = True  # Discard draft after processing by default
 
 
 @dataclass
@@ -186,7 +187,8 @@ class Config:
                 'email_column': 1
             },
             'processing': {
-                'batch_size': 10
+                'batch_size': 10,
+                'discard_draft': True
             },
             'selectors': {
                 'new_message_btn': 'button[title="Escribir un mensaje nuevo (N)"]',

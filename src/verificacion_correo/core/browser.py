@@ -423,6 +423,11 @@ class BrowserAutomation:
 
     def _close_message(self, page: Page):
         """Close the message without saving."""
+        # Only discard if configured to do so
+        if not self.config.processing.discard_draft:
+            logger.debug("Skipping discard - keeping draft as configured")
+            return
+
         try:
             page.wait_for_timeout(self.config.wait_times.before_discard)
             page.click(self.config.selectors.discard_btn, timeout=2000)
