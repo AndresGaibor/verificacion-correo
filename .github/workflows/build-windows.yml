@@ -131,6 +131,8 @@ jobs:
         run: |
           pyinstaller --onefile `
             --name VerificacionCorreos `
+            --paths=src `
+            --additional-hooks-dir=hooks `
             --collect-all playwright `
             --collect-all openpyxl `
             --collect-all pyyaml `
@@ -141,15 +143,6 @@ jobs:
             --hidden-import tkinter.scrolledtext `
             --hidden-import tkinter.filedialog `
             --hidden-import tkinter.messagebox `
-            --hidden-import verificacion_correo.core.config `
-            --hidden-import verificacion_correo.core.excel `
-            --hidden-import verificacion_correo.core.browser `
-            --hidden-import verificacion_correo.core.session `
-            --hidden-import verificacion_correo.core.extractor `
-            --hidden-import verificacion_correo.core.first_run `
-            --hidden-import verificacion_correo.gui.main `
-            --hidden-import verificacion_correo.cli.main `
-            --hidden-import verificacion_correo.utils.logging `
             --exclude-module matplotlib `
             --exclude-module scipy `
             --exclude-module pytest `
