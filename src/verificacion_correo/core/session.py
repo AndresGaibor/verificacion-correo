@@ -139,9 +139,7 @@ class SessionManager:
             if old_loop is not None:
                 asyncio.set_event_loop(old_loop)
 
-        except Exception as e:
-            logger.error(f"Error setting up interactive session: {e}")
-            return False
+
 
     def create_automation_context(self) -> Optional[BrowserContext]:
         """
