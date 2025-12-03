@@ -82,8 +82,8 @@ class SessionManager:
                         print("\n⚠️ Navegadores de Playwright no encontrados.")
                         
                         # Try to install browsers
-                        from verificacion_correo.core.first_run import ensure_playwright_browsers_installed
-                        if ensure_playwright_browsers_installed():
+                        from verificacion_correo.core.first_run import install_playwright_browsers
+                        if install_playwright_browsers():
                             # Retry browser launch after installation
                             logger.info("Retrying browser launch after installation...")
                             print("🔄 Reintentando abrir navegador...")
