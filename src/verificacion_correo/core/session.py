@@ -50,6 +50,22 @@ class SessionManager:
         logger.info("Starting interactive session setup...")
         logger.info(f"Navigate to: {self.config.page_url}")
 
+        # Thread safety hacks for Playwright in background thread
+        import asyncio
+        import threading
+        
+        # Strategy 1: Set environment variable to force sync API
+        os.environ['PLAYWRIGHT_PYTHON_SYNC_API_IN_THREAD'] = '1'
+        
+        # Strategy 2: Remove event loop for the duration of Playwright operations
+        old_loop = None
+        try:
+            old_loop = asyncio.get_event_loop()
+            asyncio.set_event_loop(None)
+        except RuntimeError:
+            # No event loop in current thread
+            pass
+
         try:
             with sync_playwright() as p:
                 # Launch browser (visible for manual interaction)
@@ -113,6 +129,15 @@ class SessionManager:
                 browser.close()
 
             return True
+
+        except Exception as e:
+            logger.error(f"Error setting up interactive session: {e}")
+            return False
+            
+        finally:
+            # Restore event loop
+            if old_loop is not None:
+                asyncio.set_event_loop(old_loop)
 
         except Exception as e:
             logger.error(f"Error setting up interactive session: {e}")
