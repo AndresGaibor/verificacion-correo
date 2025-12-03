@@ -53,10 +53,36 @@ class SessionManager:
         try:
             with sync_playwright() as p:
                 # Launch browser (visible for manual interaction)
-                browser = p.chromium.launch(
-                    headless=False,
-                    slow_mo=1000  # Slow down operations to give user time to interact
-                )
+                try:
+                    browser = p.chromium.launch(
+                        headless=False,
+                        slow_mo=1000  # Slow down operations to give user time to interact
+                    )
+                except Exception as e:
+                    # Check if error is due to missing browser executable
+                    error_str = str(e)
+                    if "Executable doesn't exist" in error_str or "playwright install" in error_str.lower():
+                        logger.warning("Playwright browsers not installed, attempting auto-installation...")
+                        print("\n⚠️ Navegadores de Playwright no encontrados.")
+                        
+                        # Try to install browsers
+                        from verificacion_correo.core.first_run import ensure_playwright_browsers_installed
+                        if ensure_playwright_browsers_installed():
+                            # Retry browser launch after installation
+                            logger.info("Retrying browser launch after installation...")
+                            print("🔄 Reintentando abrir navegador...")
+                            browser = p.chromium.launch(
+                                headless=False,
+                                slow_mo=1000
+                            )
+                        else:
+                            raise Exception(
+                                "No se pudieron instalar los navegadores automáticamente. "
+                                "Por favor ejecuta: playwright install chromium"
+                            )
+                    else:
+                        raise e
+
                 context = browser.new_context(
                     viewport={'width': 1280, 'height': 720}
                 )
