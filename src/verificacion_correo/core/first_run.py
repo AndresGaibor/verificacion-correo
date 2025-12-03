@@ -348,29 +348,14 @@ def get_first_run_instructions() -> str:
     return instructions.strip()
 
 
-def ensure_playwright_browsers_installed() -> bool:
+def install_playwright_browsers() -> bool:
     """
-    Ensure Playwright browsers are installed, installing them if necessary.
-
-    This function can be called from anywhere to ensure browsers are available.
-
+    Install Playwright browsers using the command line interface.
+    
     Returns:
-        True if browsers are installed or successfully installed, False otherwise
+        True if installation was successful, False otherwise
     """
     try:
-        from playwright.sync_api import sync_playwright
-
-        # First check if browsers are already installed
-        try:
-            with sync_playwright() as p:
-                browser_path = p.chromium.executable_path
-                if browser_path and Path(browser_path).exists():
-                    logger.info(f"Playwright browsers already installed at {browser_path}")
-                    return True
-        except Exception:
-            # Browsers not installed, proceed to install
-            pass
-
         # Install browsers
         logger.info("Installing Playwright browsers...")
         print("📥 Descargando navegadores de Playwright (primera vez)...")
@@ -397,6 +382,37 @@ def ensure_playwright_browsers_installed() -> bool:
         logger.error("Timeout installing Playwright browsers")
         print("❌ Timeout al descargar navegadores (más de 5 minutos)")
         return False
+    except Exception as e:
+        logger.error(f"Error installing Playwright browsers: {e}")
+        print(f"❌ Error al instalar navegadores: {e}")
+        return False
+
+
+def ensure_playwright_browsers_installed() -> bool:
+    """
+    Ensure Playwright browsers are installed, installing them if necessary.
+
+    This function can be called from anywhere to ensure browsers are available.
+
+    Returns:
+        True if browsers are installed or successfully installed, False otherwise
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+
+        # First check if browsers are already installed
+        try:
+            with sync_playwright() as p:
+                browser_path = p.chromium.executable_path
+                if browser_path and Path(browser_path).exists():
+                    logger.info(f"Playwright browsers already installed at {browser_path}")
+                    return True
+        except Exception:
+            # Browsers not installed, proceed to install
+            pass
+
+        return install_playwright_browsers()
+
     except Exception as e:
         logger.error(f"Error ensuring Playwright browsers: {e}")
         print(f"❌ Error al verificar navegadores: {e}")
