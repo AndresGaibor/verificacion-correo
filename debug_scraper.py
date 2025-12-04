@@ -6,6 +6,116 @@ import asyncio
 import os
 from pathlib import Path
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page
+import logging
+import traceback
+from datetime import datetime
+from functools import wraps
+
+# ============================================================================
+# CONFIGURACIÓN DE LOGGING AUTOMÁTICO DE ERRORES
+# ============================================================================
+
+# Crear directorio de logs si no existe
+logs_dir = Path(__file__).parent / "logs"
+logs_dir.mkdir(exist_ok=True)
+
+# Configurar logger principal
+logger = logging.getLogger("debug_scraper")
+logger.setLevel(logging.DEBUG)
+
+# Handler para archivo - guarda TODO (incluyendo DEBUG)
+log_file = logs_dir / f"scraper_{datetime.now().strftime('%Y%m%d')}.log"
+file_handler = logging.FileHandler(log_file, encoding='utf-8')
+file_handler.setLevel(logging.DEBUG)
+
+# Handler para errores críticos en archivo separado
+error_file = logs_dir / f"scraper_errors_{datetime.now().strftime('%Y%m%d')}.log"
+error_handler = logging.FileHandler(error_file, encoding='utf-8')
+error_handler.setLevel(logging.ERROR)
+
+# Formato detallado para logs
+formatter = logging.Formatter(
+    '%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+file_handler.setFormatter(formatter)
+error_handler.setFormatter(formatter)
+
+# Handler para consola (solo INFO y superior)
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+console_formatter = logging.Formatter('%(message)s')
+console_handler.setFormatter(console_formatter)
+
+# Agregar handlers
+logger.addHandler(file_handler)
+logger.addHandler(error_handler)
+logger.addHandler(console_handler)
+
+logger.info("=" * 60)
+logger.info(f"🚀 Iniciando Debug Scraper - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+logger.info(f"📝 Logs guardándose en: {log_file}")
+logger.info(f"❌ Errores guardándose en: {error_file}")
+logger.info("=" * 60)
+
+
+def log_errors(func):
+    """Decorador para capturar y loguear errores automáticamente"""
+    @wraps(func)
+    async def async_wrapper(*args, **kwargs):
+        try:
+            return await func(*args, **kwargs)
+        except Exception as e:
+            logger.error(f"❌ Error en {func.__name__}: {str(e)}")
+            logger.error(f"Traceback completo:\n{traceback.format_exc()}")
+            
+            # Intentar tomar screenshot si hay página disponible
+            try:
+                if 'page' in kwargs or (args and hasattr(args[0], 'page')):
+                    page = kwargs.get('page') or (args[0].page if hasattr(args[0], 'page') else None)
+                    if page:
+                        screenshot_dir = Path(__file__).parent / "logs" / "screenshots"
+                        screenshot_dir.mkdir(exist_ok=True)
+                        screenshot_path = screenshot_dir / f"error_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+                        await page.screenshot(path=str(screenshot_path))
+                        logger.error(f"📸 Screenshot del error guardado: {screenshot_path}")
+            except Exception as screenshot_error:
+                logger.error(f"No se pudo tomar screenshot: {screenshot_error}")
+            
+            raise
+    
+    @wraps(func)
+    def sync_wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            logger.error(f"❌ Error en {func.__name__}: {str(e)}")
+            logger.error(f"Traceback completo:\n{traceback.format_exc()}")
+            raise
+    
+    if asyncio.iscoroutinefunction(func):
+        return async_wrapper
+    else:
+        return sync_wrapper
+
+
+# Manejador global de excepciones no capturadas
+def handle_exception(exc_type, exc_value, exc_traceback):
+    """Captura excepciones no manejadas y las registra"""
+    if issubclass(exc_type, KeyboardInterrupt):
+        # Dejar que KeyboardInterrupt se maneje normalmente
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+    
+    logger.critical("❌ EXCEPCIÓN NO CAPTURADA", exc_info=(exc_type, exc_value, exc_traceback))
+    logger.critical(f"Tipo: {exc_type.__name__}")
+    logger.critical(f"Valor: {exc_value}")
+    logger.critical(f"Traceback:\n{''.join(traceback.format_tb(exc_traceback))}")
+
+import sys
+sys.excepthook = handle_exception
+
+# ============================================================================
 
 
 class DebugScraper:
@@ -18,6 +128,7 @@ class DebugScraper:
         # Usar el archivo state.json del proyecto
         self.session_file = Path(session_file).resolve()
         
+    @log_errors
     async def iniciar_sesion(self, url: str = "https://www.google.com"):
         """Inicializa el navegador y carga la sesión desde state.json"""
         print("🚀 Iniciando navegador...")
@@ -196,6 +307,7 @@ class DebugScraper:
 
 from urllib.parse import unquote
 
+@log_errors
 async def esperar_carga_completa(page, timeout: int = 120):
     """
     Espera a que Outlook termine de cargar los contactos detectando el spinner.
@@ -252,6 +364,7 @@ async def esperar_carga_completa(page, timeout: int = 120):
         print(f"   ⚠️ Error detectando spinner: {e} - usando espera de seguridad")
         await asyncio.sleep(3)
 
+@log_errors
 async def extraer_detalles_contacto(page, fila, nombre_contacto: str):
     """
     Hace clic en un contacto y extrae toda su información del panel de detalles.
@@ -431,6 +544,7 @@ async def extraer_detalles_contacto(page, fila, nombre_contacto: str):
     return detalles
 
 
+@log_errors
 async def scrape_outlook_contacts(page, max_contacts: int = 50):
     """Scrape de contactos de Outlook con scroll infinito y extracción de detalles
     
@@ -536,13 +650,20 @@ async def scrape_outlook_contacts(page, max_contacts: int = 50):
     
     # 4. Handler para guardar automáticamente al interrumpir
     def guardar_y_salir(signum, frame):
+        logger.warning("⚠️ Interrupción detectada - Guardando progreso...")
         print("\n\n⚠️ Interrupción detectada - Guardando progreso...")
         todos_contactos = contactos_previos + contactos_nuevos
         if todos_contactos:
-            guardar_excel(todos_contactos, data_dir, excel_path)
-            # Guardar metadata con scroll count
-            guardar_metadata(metadata_file, contactos_previos + contactos_nuevos, scroll_count_actual)
+            try:
+                guardar_excel(todos_contactos, data_dir, excel_path)
+                # Guardar metadata con scroll count
+                guardar_metadata(metadata_file, contactos_previos + contactos_nuevos, scroll_count_actual)
+                logger.info(f"💾 Progreso guardado - {len(todos_contactos)} contactos")
+            except Exception as e:
+                logger.error(f"❌ Error guardando al interrumpir: {e}")
+                logger.error(traceback.format_exc())
         print("💾 Progreso guardado. Saliendo...")
+        logger.info("🔚 Saliendo del scraper")
         sys.exit(0)
     
     signal.signal(signal.SIGINT, guardar_y_salir)
@@ -642,6 +763,7 @@ async def scrape_outlook_contacts(page, max_contacts: int = 50):
     
     return todos_contactos
 
+@log_errors
 def guardar_metadata(metadata_file, contactos, scroll_count):
     """Guarda metadata de la sesión de scraping"""
     import json
@@ -654,11 +776,14 @@ def guardar_metadata(metadata_file, contactos, scroll_count):
         'timestamp': datetime.now().isoformat()
     }
     
+    logger.info(f"📝 Guardando metadata - Total: {len(contactos)}, Scrolls: {scroll_count}")
     with open(metadata_file, 'w', encoding='utf-8') as f:
         json.dump(metadata, f, indent=2, ensure_ascii=False)
     
+    logger.info(f"✅ Metadata guardada en: {metadata_file}")
     print(f"📝 Metadata guardada - Scrolls: {scroll_count}")
 
+@log_errors
 def guardar_excel(contactos, data_dir, excel_path_existente=None):
     """Guarda contactos en Excel"""
     import pandas as pd
@@ -667,12 +792,14 @@ def guardar_excel(contactos, data_dir, excel_path_existente=None):
     if excel_path_existente and excel_path_existente.exists():
         # Actualizar el archivo existente
         excel_path = excel_path_existente
+        logger.info(f"💾 Actualizando Excel existente: {excel_path}")
         print(f"\n💾 Actualizando Excel existente: {excel_path}")
     else:
         # Crear nuevo archivo con timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         excel_filename = f"contactos_organos_judiciales_{timestamp}.xlsx"
         excel_path = data_dir / excel_filename
+        logger.info(f"📄 Creando nuevo Excel: {excel_path}")
         print(f"\n💾 Guardando {len(contactos)} contactos en nuevo Excel: {excel_path}")
     
     df = pd.DataFrame(contactos)
@@ -688,10 +815,12 @@ def guardar_excel(contactos, data_dir, excel_path_existente=None):
             ) + 2
             worksheet.column_dimensions[chr(65 + idx)].width = min(max_length, 50)
     
+    logger.info(f"✅ Excel guardado exitosamente: {excel_path} - {len(contactos)} contactos")
     print(f"✅ Excel guardado: {excel_path}")
     print(f"📊 Total contactos de ORGANOS JUDICIALES: {len(contactos)}")
 
 
+@log_errors
 async def main():
     """Función principal para debugging"""
     
@@ -718,8 +847,11 @@ async def main():
 
         await scraper.guardar_sesion()
     except KeyboardInterrupt:
+        logger.warning("⚠️  Interrumpido por el usuario")
         print("\n\n⚠️  Interrumpido por el usuario")
     except Exception as e:
+        logger.critical(f"❌ Error crítico en main: {e}")
+        logger.critical(f"Traceback:\n{traceback.format_exc()}")
         print(f"\n❌ Error: {e}")
         import traceback
         traceback.print_exc()
