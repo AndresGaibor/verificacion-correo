@@ -52,8 +52,10 @@ def crear_headers_si_no_existen(archivo_path):
         for col_idx, header in enumerate(HEADERS, start=1):
             ws.cell(row=1, column=col_idx, value=header)
 
-        # Crear el directorio si no existe
-        os.makedirs(os.path.dirname(archivo_path), exist_ok=True)
+        # Crear el directorio padre si no existe (y si tiene uno)
+        parent = os.path.dirname(archivo_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         wb.save(archivo_path)
         return
 

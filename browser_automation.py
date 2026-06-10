@@ -28,8 +28,8 @@ async def _esperar_login_manual(page: Page, url: str, timeout_segundos: int = 30
     Returns:
         True si el login fue exitoso, False si se agotó el tiempo
     """
-    print("🔑 Inicie sesión manualmente en la ventana del navegador.")
-    print(f"⏳ Esperando hasta {timeout_segundos // 60} minutos a que inicie sesión...")
+    print("[*] Inicie sesion manualmente en la ventana del navegador.")
+    print(f"[...] Esperando hasta {timeout_segundos // 60} minutos a que inicie sesion...")
 
     for _ in range(timeout_segundos):
         try:
@@ -39,11 +39,11 @@ async def _esperar_login_manual(page: Page, url: str, timeout_segundos: int = 30
             continue
 
         if 'correoweb.madrid.org/owa' in url_actual.lower():
-            print("✅ Login detectado - sesión establecida")
+            print("[OK] Login detectado - sesion establecida")
             return True
 
         if 'timeout' in url_actual.lower() or 'logout' in url_actual.lower():
-            print("⚠️  Detectado TimeoutLogout - reintentando navegación...")
+            print("[!] Detectado TimeoutLogout - reintentando navegacion...")
             try:
                 await page.goto(url, wait_until="load", timeout=120000)
             except Exception as e:
@@ -51,7 +51,7 @@ async def _esperar_login_manual(page: Page, url: str, timeout_segundos: int = 30
 
         await asyncio.sleep(1)
 
-    print("⚠️  Tiempo de espera agotado - continuando de todos modos")
+    print("[!] Tiempo de espera agotado - continuando de todos modos")
     return False
 
 
@@ -139,7 +139,7 @@ async def procesar_lote(browser, context, lote, archivo_excel, numero_lote, tota
                             pass
 
                 if email_span is None:
-                    print(f"✗ Token no encontrado (buscado: {email})")
+                    print(f"[X] Token no encontrado (buscado: {email})")
                     escribir_resultado(archivo_excel, fila, "ERROR")
                     stats['error'] += 1
                     continue
@@ -154,7 +154,7 @@ async def procesar_lote(browser, context, lote, archivo_excel, numero_lote, tota
                     visible = False
 
                 if not visible:
-                    print("✗ Popup no se abrió")
+                    print("[X] Popup no se abrio")
                     escribir_resultado(archivo_excel, fila, "ERROR")
                     stats['error'] += 1
                     continue
@@ -164,15 +164,15 @@ async def procesar_lote(browser, context, lote, archivo_excel, numero_lote, tota
                 if resultado and resultado.get('sip') and resultado.get('sip').strip():
                     escribir_resultado(archivo_excel, fila, "OK", resultado)
                     stats['ok'] += 1
-                    print("✓ OK")
+                    print("[OK] OK")
                 elif resultado and any(resultado.values()):
                     escribir_resultado(archivo_excel, fila, "NO EXISTE")
                     stats['no_existe'] += 1
-                    print("✗ NO EXISTE (sin SIP)")
+                    print("[NO] NO EXISTE (sin SIP)")
                 else:
                     escribir_resultado(archivo_excel, fila, "NO EXISTE")
                     stats['no_existe'] += 1
-                    print("✗ NO EXISTE")
+                    print("[NO] NO EXISTE")
 
                 await page.keyboard.press("Escape")
                 await page.wait_for_timeout(WAIT_TIMES['after_close_popup'])
@@ -230,8 +230,8 @@ async def procesar_todos_los_lotes(lotes_info, archivo_excel):
 
             if ('login' in page.url.lower() or 'signin' in page.url.lower()
                     or 'adfs' in page.url.lower() or 'sts.' in page.url.lower()):
-                print("⚠️  Sesión expirada - redirigido a página de login")
-                print("🔄 Cerrando contexto con sesión vieja y creando uno nuevo...")
+                print("[!] Sesion expirada - redirigido a pagina de login")
+                print("[*] Cerrando contexto con sesion vieja y creando uno nuevo...")
 
                 await page.close()
                 await context.close()
@@ -241,7 +241,7 @@ async def procesar_todos_los_lotes(lotes_info, archivo_excel):
                 await page.goto(PAGE_URL, wait_until="load", timeout=120000)
 
                 if not await _esperar_login_manual(page, PAGE_URL):
-                    print("❌ No se pudo restablecer la sesión")
+                    print("[X] No se pudo restablecer la sesion")
                     await context.close()
                     await browser.close()
                     return total_stats
@@ -252,7 +252,7 @@ async def procesar_todos_los_lotes(lotes_info, archivo_excel):
                 storage = await context.storage_state()
                 with open(state_path, 'w') as f:
                     json.dump(storage, f, indent=2)
-                print(f"💾 Nueva sesión guardada en {state_path}")
+                print(f"[+] Nueva sesion guardada en {state_path}")
 
             for idx, lote in enumerate(lotes, 1):
                 lote_stats = await procesar_lote(

@@ -5,6 +5,12 @@ Lee emails desde Excel, procesa solo los pendientes en lotes,
 y guarda resultados incrementalmente.
 """
 
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from windows_compat import setup_console_encoding
+setup_console_encoding()
+
 import asyncio
 from excel_reader import leer_correos_pendientes
 from browser_automation import procesar_todos_los_lotes
@@ -29,7 +35,7 @@ def main():
     print(f"Pendientes: {lotes_info['total_pendientes']}")
 
     if lotes_info['total_pendientes'] == 0:
-        print("\n✓ No hay emails pendientes para procesar.")
+        print("\n[OK] No hay emails pendientes para procesar.")
         print("  Para re-procesar un email, borra su columna 'Status' en el Excel.")
         return
 
@@ -47,9 +53,9 @@ def main():
     print("\n" + "="*70)
     print("RESUMEN FINAL")
     print("="*70)
-    print(f"✓ {stats['ok']} contactos encontrados y guardados")
-    print(f"✗ {stats['no_existe']} no existen")
-    print(f"⚠ {stats['error']} errores")
+    print(f"[OK] {stats['ok']} contactos encontrados y guardados")
+    print(f"[NO] {stats['no_existe']} no existen")
+    print(f"[ERR] {stats['error']} errores")
     print(f"\nTotal procesado: {stats['ok'] + stats['no_existe'] + stats['error']}")
     print(f"\nResultados guardados en: {archivo_excel}")
     print("="*70)

@@ -2,13 +2,18 @@
 GUI para el scraper de contactos de Outlook
 Proporciona una interfaz gráfica para configurar y ejecutar el scraper
 """
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from windows_compat import setup_console_encoding
+setup_console_encoding()
+
 import tkinter as tk
 from tkinter import ttk, filedialog, scrolledtext
 import asyncio
 import threading
 from pathlib import Path
 from datetime import datetime
-import sys
 
 # Importar el scraper
 from debug_scraper import DebugScraper, scrape_outlook_contacts, logger
