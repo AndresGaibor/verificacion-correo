@@ -129,18 +129,18 @@ class DebugScraper:
         self.session_file = Path(session_file).resolve()
         
     @log_errors
-    async def iniciar_sesion(self, url: str = "https://www.google.com"):
+    async def iniciar_sesion(self, url: str = "https://www.google.com", usar_sesion_guardada: bool = True):
         """Inicializa el navegador y carga la sesión desde state.json"""
         print("🚀 Iniciando navegador...")
         
         self.playwright = await async_playwright().start()
         
         # Verificar si existe el archivo de sesión
-        if self.session_file.exists():
+        sesion_valida = self.session_file.exists() and usar_sesion_guardada
+        if sesion_valida:
             print(f"✅ Archivo de sesión encontrado: {self.session_file}")
         else:
-            print(f"⚠️  Archivo de sesión NO encontrado: {self.session_file}")
-            print("   El navegador se iniciará sin sesión guardada")
+            print(f"⚠️  Iniciando sin sesión guardada (state.json no existe o ignorado)")
         
         # Iniciar navegador
         self.browser = await self.playwright.chromium.launch(
@@ -151,12 +151,12 @@ class DebugScraper:
             ],
         )
         
-        # Crear contexto con sesión guardada (si existe)
+        # Crear contexto con sesión guardada (si existe y es válida)
         context_options = {
             'viewport': {'width': 1280, 'height': 720},
         }
         
-        if self.session_file.exists():
+        if sesion_valida:
             context_options['storage_state'] = str(self.session_file)
             print("🔑 Cargando sesión desde state.json...")
         
@@ -169,9 +169,53 @@ class DebugScraper:
         
         # Navegar a URL inicial
         print(f"🌐 Navegando a: {url}")
-        await self.page.goto(url, wait_until="networkidle")
-        print("✅ Página cargada")
+        await self.page.goto(url, wait_until="load", timeout=120000)
         
+        # Verificar si nos redirigió a la página de login (ADFS)
+        url_actual = self.page.url
+        if sesion_valida and ('login' in url_actual.lower() or 'signin' in url_actual.lower() or 'adfs' in url_actual.lower() or 'sts.' in url_actual.lower()):
+            print("⚠️  Sesión expirada - redirigido a página de login")
+            print("🔄 Cerrando contexto con sesión vieja y creando uno nuevo...")
+            
+            # Cerrar la página y el contexto actual (con la sesión vieja)
+            await self.page.close()
+            await self.context.close()
+            
+            # Crear nuevo contexto SIN la sesión vieja
+            self.context = await self.browser.new_context(
+                viewport={'width': 1280, 'height': 720}
+            )
+            self.page = await self.context.new_page()
+            
+            print("🔑 Inicie sesión manualmente en la ventana del navegador.")
+            print("⏳ Esperando hasta 5 minutos a que inicie sesión...")
+            
+            # Navegar de nuevo
+            await self.page.goto(url, wait_until="load", timeout=120000)
+            
+            # Esperar a que el usuario complete el login
+            import asyncio
+            for _ in range(300):
+                try:
+                    url_actual = self.page.url
+                except:
+                    await asyncio.sleep(1)
+                    continue
+                # Login exitoso = estamos en OWA (no en ADFS/login)
+                if 'correoweb.madrid.org/owa' in url_actual.lower():
+                    print("✅ Login detectado - sesión establecida")
+                    await self.guardar_sesion()
+                    print("💾 Nueva sesión guardada en state.json")
+                    break
+                # Si vemos TimeoutLogout, algo salió mal - reintentar navegación
+                if 'timeout' in url_actual.lower() or 'logout' in url_actual.lower():
+                    print("⚠️  Detectado TimeoutLogout - reintentando navegación...")
+                    await self.page.goto(url, wait_until="load", timeout=120000)
+                await asyncio.sleep(1)
+            else:
+                print("⚠️  Tiempo de espera agotado - continuando de todos modos")
+        
+        print("✅ Página cargada")
         return self.page
     
     async def listar_directorio(self):
@@ -545,7 +589,7 @@ async def extraer_detalles_contacto(page, fila, nombre_contacto: str):
 
 
 @log_errors
-async def scrape_outlook_contacts(page, max_contacts: int = 50):
+async def scrape_outlook_contacts(page, max_contacts: int = 50, progress_callback=None, stop_flag=None):
     """Scrape de contactos de Outlook con scroll infinito y extracción de detalles
     
     Soporta reanudación: Si existe un Excel previo, continúa desde donde quedó.
@@ -554,6 +598,8 @@ async def scrape_outlook_contacts(page, max_contacts: int = 50):
     Args:
         page: Página de Playwright
         max_contacts: Número máximo TOTAL de contactos (incluyendo los ya guardados)
+        progress_callback: Función callback que recibe el número actual de contactos extraídos
+        stop_flag: Dict con clave 'stop' que cuando es True detiene la extracción
     """
     
     import pandas as pd
@@ -597,6 +643,10 @@ async def scrape_outlook_contacts(page, max_contacts: int = 50):
             contactos_previos = df_previo.to_dict('records')
             print(f"✅ Cargados {len(contactos_previos)} contactos previos")
             
+            # Notificar a la GUI sobre contactos previos cargados
+            if progress_callback:
+                progress_callback(len(contactos_previos))
+            
             if len(contactos_previos) > 0:
                 ultimo_nombre = contactos_previos[-1]['nombre']
                 print(f"🔄 Último contacto procesado: {ultimo_nombre}")
@@ -618,7 +668,7 @@ async def scrape_outlook_contacts(page, max_contacts: int = 50):
     # 1. ESPERA CRÍTICA: Esperar a que aparezca al menos un contacto
     print(f"⏳ Esperando a que cargue la lista del Directorio...")
     try:
-        await page.wait_for_selector(row_selector, state="visible", timeout=30000)
+        await page.wait_for_selector(row_selector, state="visible", timeout=120000)
         print("✅ Lista detectada")
     except Exception as e:
         print(f"❌ Error: La lista no cargó a tiempo. \nDetalle: {e}")
@@ -631,6 +681,11 @@ async def scrape_outlook_contacts(page, max_contacts: int = 50):
     if scroll_count_guardado > 0:
         print(f"\n⚡ Saltando directamente a scroll #{scroll_count_guardado}...")
         for i in range(scroll_count_guardado):
+            # Verificar si se solicitó detener
+            if stop_flag and stop_flag.get('stop', False):
+                print("⏹️ Detención solicitada durante el scroll inicial")
+                return contactos_previos
+            
             await page.keyboard.press("PageDown")
             await asyncio.sleep(0.3)
             
@@ -673,6 +728,11 @@ async def scrape_outlook_contacts(page, max_contacts: int = 50):
 
     # 5. Loop principal de extracción
     while True:
+        # Verificar si se solicitó detener
+        if stop_flag and stop_flag.get('stop', False):
+            print("⏹️ Detención solicitada - guardando progreso...")
+            break
+        
         filas = await page.locator(row_selector).all()
 
         if not filas:
@@ -680,6 +740,11 @@ async def scrape_outlook_contacts(page, max_contacts: int = 50):
             break
 
         for fila in filas:
+            # Verificar si se solicitó detener
+            if stop_flag and stop_flag.get('stop', False):
+                print("⏹️ Detención solicitada - guardando progreso...")
+                break
+            
             try:
                 raw_name = await fila.get_attribute("aria-label")
                 nombre = raw_name.strip() if raw_name else "Desconocido"
@@ -704,6 +769,10 @@ async def scrape_outlook_contacts(page, max_contacts: int = 50):
                 if detalles['compania'] and 'ORGANOS JUDICIALES' in detalles['compania'].upper():
                     contactos_nuevos.append(detalles)
                     print(f"✅ Guardado ({total_actual + 1}/{max_contacts}) - ORGANOS JUDICIALES")
+                    
+                    # Notificar progreso a la GUI
+                    if progress_callback:
+                        progress_callback(len(contactos_previos) + len(contactos_nuevos))
                 else:
                     print(f"⏭️  Omitido - Compañía: {detalles['compania'] if detalles['compania'] else 'N/A'}")
                     contactos_procesados.remove(nombre)
@@ -838,7 +907,7 @@ async def main():
         await page.wait_for_load_state("networkidle")
 
         directorio = page.get_by_label("Directorio", exact=True).locator("div").filter(has_text="Directorio").nth(1)
-        await directorio.click()
+        await directorio.click(timeout=120000)
 
         # Extraer contactos completos y guardar en Excel en data/
         await scrape_outlook_contacts(page, max_contacts=100)

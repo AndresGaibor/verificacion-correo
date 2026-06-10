@@ -13,6 +13,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, Callable
 import yaml
+import asyncio
+import sys
 
 from verificacion_correo.core.config import Config
 from verificacion_correo.core.browser import BrowserAutomation
@@ -129,6 +131,15 @@ class VerificacionCorreosGUI:
         # Setup logging for GUI - use DEBUG to see detailed asyncio/playwright logs
         setup_logging(level="DEBUG")
         self.log_messages = []
+        
+        # Scraper state variables
+        self.scraper_output_dir = tk.StringVar(value=str(Path.cwd() / "data"))
+        self.scraper_max_contacts = tk.IntVar(value=100)
+        self.scraper_extracted_count = tk.IntVar(value=0)
+        self.scraper_active = False
+        self.scraper_thread = None
+        self.scraper_stop_flag = {'stop': False}
+        self.scraper_log_messages = []
 
         # Create interface
         self._create_widgets()
@@ -148,6 +159,7 @@ class VerificacionCorreosGUI:
         self._create_processing_tab()
         self._create_session_tab()
         self._create_config_tab()
+        self._create_scraper_tab()
 
         # Create status bar
         self._create_status_bar(main_container)
@@ -339,6 +351,349 @@ class VerificacionCorreosGUI:
             text="🔧 Asistente de Configuración",
             command=self._run_config_wizard
         ).pack(side='left', padx=(5, 0))
+
+    def _create_scraper_tab(self):
+        """Create scraper tab for extracting Outlook contacts."""
+        self.scraper_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.scraper_frame, text="🔍 Scraper de Contactos")
+
+        main_frame = ttk.Frame(self.scraper_frame)
+        main_frame.pack(fill='both', expand=True, padx=10, pady=10)
+
+        # Configuration section
+        config_frame = ttk.LabelFrame(main_frame, text="Configuración de Scraping", padding=10)
+        config_frame.pack(fill='x', pady=(0, 10))
+
+        # Output directory
+        dir_label_frame = ttk.Frame(config_frame)
+        dir_label_frame.pack(fill='x', pady=(0, 5))
+        ttk.Label(dir_label_frame, text="Directorio de salida:").pack(anchor='w')
+
+        dir_input_frame = ttk.Frame(config_frame)
+        dir_input_frame.pack(fill='x', pady=(0, 10))
+
+        ttk.Entry(
+            dir_input_frame,
+            textvariable=self.scraper_output_dir,
+            state='readonly',
+            width=60
+        ).pack(side='left', fill='x', expand=True, padx=(0, 5))
+
+        ttk.Button(
+            dir_input_frame,
+            text="📁 Seleccionar",
+            command=self._select_scraper_directory
+        ).pack(side='left')
+
+        # Contact quantity
+        quantity_label_frame = ttk.Frame(config_frame)
+        quantity_label_frame.pack(fill='x', pady=(0, 5))
+        ttk.Label(quantity_label_frame, text="Cantidad de contactos a extraer:").pack(anchor='w')
+
+        quantity_frame = ttk.Frame(config_frame)
+        quantity_frame.pack(fill='x')
+
+        ttk.Spinbox(
+            quantity_frame,
+            from_=1,
+            to=10000,
+            textvariable=self.scraper_max_contacts,
+            width=20
+        ).pack(anchor='w')
+
+        # Control section
+        control_frame = ttk.LabelFrame(main_frame, text="Control de Extracción", padding=10)
+        control_frame.pack(fill='x', pady=(0, 10))
+
+        button_frame = ttk.Frame(control_frame)
+        button_frame.pack(fill='x')
+
+        self.scraper_start_btn = ttk.Button(
+            button_frame,
+            text="▶️ Iniciar Extracción",
+            command=self._start_scraper,
+            style='Accent.TButton'
+        )
+        self.scraper_start_btn.pack(side='left', padx=(0, 5), fill='x', expand=True)
+
+        self.scraper_stop_btn = ttk.Button(
+            button_frame,
+            text="⏹️ Detener",
+            command=self._stop_scraper,
+            state='disabled'
+        )
+        self.scraper_stop_btn.pack(side='left', fill='x', expand=True)
+
+        # Progress section
+        progress_frame = ttk.LabelFrame(main_frame, text="Progreso de Extracción", padding=10)
+        progress_frame.pack(fill='x', pady=(0, 10))
+
+        # Counter
+        counter_frame = ttk.Frame(progress_frame)
+        counter_frame.pack(fill='x', pady=(0, 5))
+
+        ttk.Label(counter_frame, text="Contactos extraídos:").pack(side='left')
+
+        self.scraper_counter_label = ttk.Label(
+            counter_frame,
+            textvariable=self.scraper_extracted_count,
+            font=('TkDefaultFont', 14, 'bold'),
+            foreground='#27ae60'
+        )
+        self.scraper_counter_label.pack(side='left', padx=5)
+
+        self.scraper_total_label = ttk.Label(
+            counter_frame,
+            text="/ 0",
+            font=('TkDefaultFont', 12),
+            foreground='gray'
+        )
+        self.scraper_total_label.pack(side='left')
+
+        # Progress bar
+        self.scraper_progress_bar = ttk.Progressbar(
+            progress_frame,
+            mode='determinate',
+            length=300
+        )
+        self.scraper_progress_bar.pack(fill='x', pady=(0, 5))
+
+        # Status
+        self.scraper_status_label = ttk.Label(
+            progress_frame,
+            text="⚪ Esperando...",
+            font=('TkDefaultFont', 10, 'italic'),
+            foreground='gray'
+        )
+        self.scraper_status_label.pack(anchor='w')
+
+        # Log section
+        log_frame = ttk.LabelFrame(main_frame, text="Log de Scraping", padding=10)
+        log_frame.pack(fill='both', expand=True)
+
+        self.scraper_log_text = scrolledtext.ScrolledText(
+            log_frame,
+            height=12,
+            wrap=tk.WORD,
+            font=('Consolas', 9)
+        )
+        self.scraper_log_text.pack(fill='both', expand=True, pady=(0, 5))
+
+        # Log control buttons
+        log_control_frame = ttk.Frame(log_frame)
+        log_control_frame.pack(fill='x')
+
+        ttk.Button(
+            log_control_frame,
+            text="Limpiar",
+            command=self._clear_scraper_log
+        ).pack(side='left', padx=(0, 5))
+
+        ttk.Button(
+            log_control_frame,
+            text="Guardar Log",
+            command=self._save_scraper_log
+        ).pack(side='left')
+
+        # Initial log message
+        self._add_scraper_log("✅ Interfaz de scraper iniciada correctamente")
+        self._add_scraper_log(f"📁 Directorio de salida: {self.scraper_output_dir.get()}")
+        self._update_scraper_total_label()
+
+    def _select_scraper_directory(self):
+        """Select output directory for scraper."""
+        directory = filedialog.askdirectory(
+            title="Seleccionar directorio de salida",
+            initialdir=self.scraper_output_dir.get()
+        )
+        if directory:
+            self.scraper_output_dir.set(directory)
+            self._add_scraper_log(f"📁 Directorio cambi ado a: {directory}")
+
+    def _update_scraper_total_label(self):
+        """Update the total label with current max contacts."""
+        total = self.scraper_max_contacts.get()
+        self.scraper_total_label.config(text=f"/ {total}")
+
+    def _add_scraper_log(self, message):
+        """Add message to scraper log."""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        log_entry = f"[{timestamp}] {message}\n"
+        self.scraper_log_messages.append(log_entry)
+
+        self.scraper_log_text.insert(tk.END, log_entry)
+        self.scraper_log_text.see(tk.END)
+
+    def _clear_scraper_log(self):
+        """Clear scraper log messages."""
+        self.scraper_log_text.delete('1.0', tk.END)
+        self.scraper_log_messages.clear()
+
+    def _save_scraper_log(self):
+        """Save scraper log messages to file."""
+        file_path = filedialog.asksaveasfilename(
+            title="Guardar Log",
+            defaultextension=".log",
+            filetypes=[("Log files", "*.log"), ("Text files", "*.txt"), ("All files", "*.*")]
+        )
+        if file_path:
+            try:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.writelines(self.scraper_log_messages)
+                messagebox.showinfo("Log Guardado", f"Log guardado en:\n{file_path}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Error al guardar log: {e}")
+
+    def _update_scraper_progress(self, count):
+        """Update scraper progress counter and bar."""
+        self.scraper_extracted_count.set(count)
+        total = self.scraper_max_contacts.get()
+
+        # Update progress bar
+        if total > 0:
+            progress = (count / total) * 100
+            self.scraper_progress_bar['value'] = progress
+
+    def _update_scraper_status(self, message, color='gray'):
+        """Update scraper status label."""
+        self.scraper_status_label.config(text=message, foreground=color)
+
+    def _start_scraper(self):
+        """Start the scraper in a background thread."""
+        if self.scraper_active:
+            self._add_scraper_log("⚠️ El scraper ya está activo")
+            return
+
+        # Validate quantity
+        if self.scraper_max_contacts.get() <= 0:
+            messagebox.showwarning("Cantidad Inválida", "La cantidad debe ser mayor a 0")
+            return
+
+        # Reset variables
+        self.scraper_stop_flag['stop'] = False
+        self.scraper_extracted_count.set(0)
+        self._update_scraper_progress(0)
+        self._update_scraper_total_label()
+
+        # Update UI
+        self.scraper_start_btn.config(state='disabled')
+        self.scraper_stop_btn.config(state='normal')
+        self.scraper_active = True
+
+        self._add_scraper_log("🚀 Iniciando scraper...")
+        self._update_scraper_status("🔄 Ejecutando...", "#3498db")
+
+        # Start scraper thread
+        self.scraper_thread = threading.Thread(target=self._run_scraper_thread, daemon=True)
+        self.scraper_thread.start()
+
+    def _stop_scraper(self):
+        """Stop the scraper gracefully."""
+        if not self.scraper_active:
+            return
+
+        self._add_scraper_log("⚠️ Deteniendo scraper...")
+        self._update_scraper_status("⏸️ Deteniendo...", "#e67e22")
+        self.scraper_stop_flag['stop'] = True
+        self.scraper_stop_btn.config(state='disabled')
+
+    def _run_scraper_thread(self):
+        """Run scraper in background thread."""
+        try:
+            # Create new event loop for this thread
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            # Run the scraper
+            loop.run_until_complete(self._run_scraper_async())
+
+        except Exception as e:
+            self.root.after(0, lambda: self._add_scraper_log(f"❌ Error: {str(e)}"))
+            logger.error(f"Error en scraper thread: {e}", exc_info=True)
+        finally:
+            if loop:
+                loop.close()
+
+            # Update UI
+            self.scraper_active = False
+            self.root.after(0, lambda: self.scraper_start_btn.config(state='normal'))
+            self.root.after(0, lambda: self.scraper_stop_btn.config(state='disabled'))
+
+            if self.scraper_stop_flag['stop']:
+                self.root.after(0, lambda: self._update_scraper_status("⏹️ Detenido", "#e67e22"))
+                self.root.after(0, lambda: self._add_scraper_log("⏹️ Scraper detenido por el usuario"))
+            else:
+                self.root.after(0, lambda: self._update_scraper_status("✅ Completado", "#27ae60"))
+                self.root.after(0, lambda: self._add_scraper_log("✅ Extracción completada"))
+
+    async def _run_scraper_async(self):
+        """Async function that runs the scraper."""
+        # Import scraper functions from project root
+        project_root = Path(__file__).parent.parent.parent.parent
+        sys.path.insert(0, str(project_root))
+
+        try:
+            from debug_scraper import DebugScraper, scrape_outlook_contacts
+
+            # Progress callback for GUI updates
+            def progress_callback(count):
+                self.root.after(0, lambda: self._update_scraper_progress(count))
+
+            scraper = DebugScraper(headless=False)
+
+            try:
+                # Log start
+                self.root.after(0, lambda: self._add_scraper_log("🔑 Iniciando sesión..."))
+
+                # Start session
+                await scraper.iniciar_sesion("https://correoweb.madrid.org/owa/#path=/people")
+
+                page = scraper.page
+                await page.wait_for_load_state("networkidle")
+
+                # Navigate to directory
+                self.root.after(0, lambda: self._add_scraper_log("📂 Navegando al directorio..."))
+                directorio = page.get_by_label("Directorio", exact=True).locator("div").filter(has_text="Directorio").nth(1)
+                await directorio.click()
+
+                # Extract contacts with callback
+                max_contacts = self.scraper_max_contacts.get()
+                self.root.after(0, lambda: self._add_scraper_log(f"🔍 Extrayendo {max_contacts} contactos..."))
+
+                # Change to output directory
+                output_dir = Path(self.scraper_output_dir.get())
+                output_dir.mkdir(exist_ok=True)
+
+                # Temporarily change directory for scraper
+                import os
+                original_dir = os.getcwd()
+                os.chdir(output_dir.parent)
+
+                try:
+                    await scrape_outlook_contacts(
+                        page,
+                        max_contacts=max_contacts,
+                        progress_callback=progress_callback,
+                        stop_flag=self.scraper_stop_flag
+                    )
+                finally:
+                    os.chdir(original_dir)
+
+                # Save session
+                if not self.scraper_stop_flag['stop']:
+                    await scraper.guardar_sesion()
+                    count = self.scraper_extracted_count.get()
+                    self.root.after(0, lambda: self._add_scraper_log(
+                        f"💾 {count} contactos guardados en {output_dir}"
+                    ))
+
+            finally:
+                await scraper.cerrar()
+
+        except Exception as e:
+            self.root.after(0, lambda: self._add_scraper_log(f"❌ Error: {str(e)}"))
+            logger.error(f"Error ejecutando scraper: {e}", exc_info=True)
+            raise
 
     def _create_config_editor(self, parent):
         """Create configuration editor interface."""
