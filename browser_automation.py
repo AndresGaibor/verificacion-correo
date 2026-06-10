@@ -7,7 +7,6 @@ con cookies viejas y espera a que el usuario haga login manual.
 """
 
 import asyncio
-import re
 from playwright.async_api import async_playwright, Page, TimeoutError as PWTimeout
 from config import PAGE_URL, SELECTORS, WAIT_TIMES, BROWSER_CONFIG
 from contact_extractor import popup_info
@@ -106,12 +105,22 @@ async def procesar_lote(browser, context, lote, archivo_excel, numero_lote, tota
             print(f"  [{idx}/{len(lote)}] {email} ...", end=' ')
 
             try:
-                email_span = page.locator(f'span:has-text("{email}")').filter(
-                    has_text=re.compile(f'^{re.escape(email)}$', re.I)
-                )
+                # OWA inserta el email en un span que puede tener espacios/iconos/innerHTML
+                # extra. Buscamos cualquier span que contenga el email completo.
+                email_normalized = email.strip().lower()
+                candidates = await page.locator('span').all()
+                email_span = None
+                for cand in candidates:
+                    try:
+                        text = (await cand.inner_text()).strip().lower()
+                        if text == email_normalized or text.endswith(f':{email_normalized}'):
+                            email_span = cand
+                            break
+                    except Exception:
+                        continue
 
-                if await email_span.count() == 0:
-                    print("✗ Token no encontrado")
+                if email_span is None:
+                    print(f"✗ Token no encontrado (buscado: {email})")
                     escribir_resultado(archivo_excel, fila, "ERROR")
                     stats['error'] += 1
                     continue
