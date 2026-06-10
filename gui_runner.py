@@ -3,6 +3,7 @@ Ejecutor de procesamiento en segundo plano para la interfaz gráfica.
 Permite ejecutar la verificación de correos sin bloquear la GUI.
 """
 
+import os
 import threading
 import queue
 import time
@@ -245,7 +246,3 @@ class GUIRunner:
             return False, "La URL de la página no está configurada."
 
         return True, ""
-
-
-# Importar aquí para evitar importación circular
-import os

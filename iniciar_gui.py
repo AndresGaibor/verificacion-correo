@@ -18,7 +18,7 @@ def verificar_prerrequisitos():
     if not os.path.exists("state.json"):
         errores.append(
             "❌ No se encuentra el archivo de sesión (state.json)\n"
-            "   Ejecuta primero: python copiar_sesion.py"
+            "   Ejecuta primero: python scraper_gui.py o usa la pestaña 'Sesión' en esta GUI"
         )
 
     # Verificar archivo de configuración
