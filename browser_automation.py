@@ -105,19 +105,38 @@ async def procesar_lote(browser, context, lote, archivo_excel, numero_lote, tota
             print(f"  [{idx}/{len(lote)}] {email} ...", end=' ')
 
             try:
-                # OWA inserta el email en un span que puede tener espacios/iconos/innerHTML
-                # extra. Buscamos cualquier span que contenga el email completo.
+                # OWA inserta el email en un span con texto del nombre y el email puede
+                # estar en atributos title, aria-label, o en el src de la foto cercana.
+                # Estrategia: revisar inner_text, title y aria-label de cada span.
                 email_normalized = email.strip().lower()
-                candidates = await page.locator('span').all()
+                email_at = email_normalized.replace('@', '%40')
+
+                # 1) Buscar span cuyo title/aria-label/inner_text contenga el email
+                spans = await page.locator('span').all()
                 email_span = None
-                for cand in candidates:
+                for cand in spans:
                     try:
-                        text = (await cand.inner_text()).strip().lower()
-                        if text == email_normalized or text.endswith(f':{email_normalized}'):
+                        inner = (await cand.inner_text() or '').strip().lower()
+                        title = ((await cand.get_attribute('title')) or '').strip().lower()
+                        aria = ((await cand.get_attribute('aria-label')) or '').strip().lower()
+                        if email_normalized in (inner, title, aria):
                             email_span = cand
                             break
                     except Exception:
                         continue
+
+                # 2) Si no, buscar imagen con src que contenga el email codificado
+                if email_span is None:
+                    imgs = await page.locator(f'img[src*="{email_at}"]').all()
+                    if imgs:
+                        # Subir al ancestro que tenga clase _rw_k (estructura del token)
+                        email_span = imgs[0]
+                        try:
+                            email_span = await email_span.evaluate_handle(
+                                "el => el.closest('._rw_k') || el.closest('span') || el"
+                            )
+                        except Exception:
+                            pass
 
                 if email_span is None:
                     print(f"✗ Token no encontrado (buscado: {email})")
@@ -125,7 +144,7 @@ async def procesar_lote(browser, context, lote, archivo_excel, numero_lote, tota
                     stats['error'] += 1
                     continue
 
-                await email_span.first.click(timeout=3000)
+                await email_span.as_element().click(timeout=3000) if hasattr(email_span, 'as_element') else await email_span.click(timeout=3000)
                 await page.wait_for_timeout(WAIT_TIMES['after_click_token'])
 
                 popup_locator = page.locator(SELECTORS['popup']).first
