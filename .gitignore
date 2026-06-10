@@ -7,10 +7,19 @@
 # Archivos de sesión y configuración sensible
 state.json
 config.yaml
+config/
 
-# Archivos de datos (excepto templates)
+# Archivos de datos sensibles (correos, contactos, scraping)
+*.csv
 *.xlsx
-!data/correos_template.xlsx
+data/correos.xlsx
+data/correos_test*.xlsx
+data/correos_test_app.xlsx
+data/scraping_metadata.json
+data/contactos_organos_judiciales*.xlsx
+contactos_outlook.csv
+data/~$correos.xlsx
+~$*.xlsx
 
 # Cache de Python
 __pycache__/
@@ -24,6 +33,7 @@ __pycache__/
 build/
 dist/
 *.spec
+*.egg-info/
 
 # Archivos temporales de ejecución
 *.log
