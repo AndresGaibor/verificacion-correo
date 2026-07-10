@@ -1,208 +1,191 @@
-# CLAUDE.md
+# CLAUDE.md — Guía para IA
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## Proyecto
 
-## Project Overview
+Automatización Python que extrae contactos del directorio OWA de Madrid (correoweb.madrid.org) usando la API REST de Exchange (FindPeople + GetPersona). También incluye un scraper vía Playwright como alternativa legacy.
 
-This is a Python automation tool that uses Playwright to interact with the Madrid city webmail interface (correoweb.madrid.org/owa). The application automates the process of extracting contact information from email recipients by interacting with the OWA (Outlook Web Access) interface.
+## Arquitectura (`src/`)
 
-## Architecture
+### Core
 
-El proyecto está organizado en módulos con responsabilidades separadas:
+- **api_extractor.py** — Extracción vía API REST (recomendado).
+  - `_find_persona_id()`: busca en GAL por email → obtiene PersonaId
+  - `_get_persona()`: obtiene datos completos (phone, address, SIP, dept, etc.)
+  - `_parse_persona()`: convierte respuesta JSON a `ContactInfo`
+  - `SessionExpiredError`: se lanza cuando OWA responde HTTP 307 (sesión expirada)
+  - `process_emails_via_api()`: orquesta procesamiento batch completo
+  - Usa `urllib` + cookies de sesión (`state.json`), sin Playwright
+  - Delay entre requests: 3s
+  - Timeout: 60s
 
-### Módulos Principales
+- **gal_scraper.py** — Extracción completa del GAL (Global Address List).
+  - `scrape_gal()`: paginación con Offset, reanudable vía `ProgressFile`
+  - `ProgressFile`: guarda offset + contador en `gal_progress.json`
+  - `_flatten_persona()`: aplanado para CSV
+  - Exporta a JSON + CSV (delimitador `;`)
+  - Delay configurable (default 8s), batch size 100
+  - Acepta `stop_flag` (dict con `{"stop": bool}`) para parada externa
+  - Acepta `progress_callback(count, total)` para UI
+  - SessionExpiredError: guarda progreso y termina ordenadamente
 
-1. **copiar_sesion.py** - Gestión de Sesión
-   - Lanza navegador para autenticación manual
-   - Guarda el estado de autenticación en `state.json` para reutilización
-   - Debe ejecutarse primero para establecer una sesión válida
+- **browser.py** — Automatización con Playwright (legacy).
+  - `BrowserAutomation`: clase principal, orquesta el proceso
+  - `process_emails()`: lee Excel, procesa batches, escribe resultados
+  - Threa-safe: remueve event loop de asyncio antes de Playwright
+  - `_process_batch()`: abre mensaje nuevo, añade destinatarios, procesa cada email
+  - `_process_single_email()`: hace clic en token, espera popup, extrae info
+  - `_find_email_token()`: busca token por `img[src]` o `title`/`inner_text`
+  - `_is_valid_contact()`: validación multi-criterio del contacto extraído
 
-2. **config.py** - Configuración Centralizada
-   - `PAGE_URL`: URL de OWA
-   - `DEFAULT_EMAILS`: Emails de respaldo si no existe archivo Excel
-   - Patrones Regex: EMAIL_RE, PHONE_RE, POSTAL_ADDR_RE, SIP_RE, NAME_RE
-   - `SELECTORS`: Diccionario con selectores CSS para elementos de la interfaz OWA
-   - `WAIT_TIMES`: Tiempos de espera configurables (milisegundos)
-   - `BROWSER_CONFIG`: Configuración del navegador (headless, session_file)
-   - `EXCEL_CONFIG`: Configuración de lectura de Excel (archivo, fila inicial, columna)
+- **extractor.py** — Extracción de contactos desde popups OWA.
+  - `ContactInfo`: dataclass con name, email, phone, sip, address, department, company, office_location
+  - `ContactExtractor`: multi-capa (DOM → texto → regex)
+  - `_extract_by_text_labels()`: busca etiquetas fijas (Departamento:, Compañía:, Trabajo:, MI:)
+  - `_extract_personal_email()`: filtra tokens genéricos (ASP123@, AGM456@)
+  - Guarda screenshots y HTML de popups en `debug_screenshots/`
 
-3. **excel_reader.py** - Lectura de Datos
-   - `leer_correos_excel(archivo_path)`: Lee emails desde archivo Excel
-     - Lee columna A desde fila 2 en adelante (configurable)
-     - Retorna lista de direcciones de email
-     - Fallback a DEFAULT_EMAILS si archivo no existe o está vacío
+- **config.py** — Config centralizada via YAML.
+  - `Config`: carga de `config/default.yaml` con fallback a `config.yaml`
+  - Dataclasses: `BrowserConfig`, `ExcelConfig`, `ProcessingConfig`, `Selectors`, `WaitTimes`, `RegexPatterns`
+  - `get_config()`: singleton global
+  - Soporta PyInstaller (archivos embebidos en `sys._MEIPASS`)
 
-4. **contact_extractor.py** - Extracción de Información
-   - `extract_from_popup_text(text)`: Extracción basada en regex del texto del popup
-   - `popup_info(page)`: Función principal de extracción que:
-     1. Espera popup con selector `div._pe_Y[ispopup="1"]`
-     2. Intenta selectores DOM específicos (ej: `span._pe_c1._pe_t1` para nombre)
-     3. Fallback a extracción regex desde texto completo
-     4. Consolida resultados priorizando selectores específicos sobre regex matches
+- **excel.py** — Operaciones Excel incrementales.
+  - `ExcelReader.read_pending_emails()`: lee filas con Status vacío → `ExcelSummary` con batches
+  - `ExcelWriter.write_result()` / `write_batch_results()`: escribe Status + datos de contacto
+  - `ProcessingStatus`: PENDING(""), SUCCESS("OK"), NOT_FOUND("NO EXISTE"), ERROR("ERROR")
+  - Columnas fijas A-J (ver README.md)
+  - Auto-creación del Excel con datos de ejemplo si no existe
 
-5. **browser_automation.py** - Automatización del Navegador
-   - `procesar_emails(emails)`: Función principal que orquesta el proceso completo
-     - Lanza navegador con sesión guardada
-     - Navega a OWA y abre nuevo mensaje
-     - Procesa cada email: hace clic en token, extrae info, cierra popup
-     - Retorna lista de resultados
+- **session.py** — Gestión de sesión del navegador.
+  - `SessionManager`: creación, validación, limpieza
+  - `setup_interactive_session()`: abre navegador visible para login manual (5 min timeout)
+  - `create_automation_context()`: contexto con `storage_state` cargado
+  - `validate_session()`: navega a OWA, busca botón de nuevo mensaje
+  - Threa-safe (remueve event loop como browser.py)
 
-6. **app.py** - Script Principal (Punto de Entrada)
-   - Script simplificado (~30 líneas) que orquesta todo el proceso
-   - Lee emails desde Excel usando `excel_reader`
-   - Procesa emails usando `browser_automation`
-   - Muestra resumen final
+- **first_run.py** — Setup inicial automático.
+  - `FirstRunManager`: crea config, directorios, Excel y Playwright browsers
+  - `install_playwright_browsers()`: subprocess a `playwright install chromium`
+  - `check_and_run_first_time_setup()`: entry point unificado
 
-## Development Setup
+### CLI (`cli/main.py`)
 
-1. **Create virtual environment**:
-   ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-   ```
+- `VerificacionCorreoCLI`: 5 comandos con argparse
+  - `process`: procesa pendientes (Playwright)
+  - `setup`: configura sesión
+  - `validate`: valida setup
+  - `status`: muestra estado
+  - `scrape-gallery`: GAL vía API, con --output-dir, --max-contacts, --batch-size, --delay, --force-restart
+- `__main__.py` → `python -m verificacion_correo` lanza CLI
 
-2. **Install dependencies**:
-   ```bash
-   pip install playwright openpyxl
-   playwright install chromium
-   ```
+### GUI (`gui/main.py`)
 
-3. **Configure email addresses**:
-   - Create or edit `data/correos.xlsx`
-   - Place email addresses in column A, starting from row 2
-   - Row 1 should contain the header "Correo"
-   - Example structure:
-     ```
-     | A                 |
-     |-------------------|
-     | Correo            | <- Row 1 (header)
-     | user1@madrid.org  | <- Row 2
-     | user2@madrid.org  | <- Row 3
-     | ...               |
-     ```
-   - An example file is provided with default emails
+- Tkinter, 4 pestañas (Procesamiento, Sesión, Configuración, Scraper de Contactos)
+- `GUIService`: orquesta procesamiento/API/GAL en background thread
+- Scraper tab: usa `api_extractor.py` + `gal_scraper.py` directamente (sin Playwright)
 
-4. **Create session file**:
-   ```bash
-   python copiar_sesion.py
-   # Follow the manual login prompts, then press ENTER to save session
-   ```
-
-5. **Run the automation**:
-   ```bash
-   python app.py
-   ```
-
-## Important Implementation Details
-
-- **Session Persistence**: The `state.json` file contains authentication cookies and must exist before running `app.py`
-- **DOM Selectors**: The script targets specific OWA interface elements:
-  - New message button: `button[title="Escribir un mensaje nuevo (N)"]`
-  - To field: `textbox` with role and name "Para"
-  - Email tokens: Located via regex pattern matching on visible text
-  - Popup cards: `div._pe_Y[ispopup="1"]`
-- **Timing Strategy**: Uses explicit waits (`wait_for_timeout`, `wait_for_selector`) to handle dynamic content loading
-- **Error Handling**: Uses try-except blocks for optional extractions (see `safe_text()` and popup selector waits)
-- **Contact Extraction Strategy**:
-  - Primary: Use specific DOM selectors (class names, autoids)
-  - Fallback: Extract from raw text using regex
-  - Name format expected: "APELLIDO, NOMBRE" (surname, firstname)
-  - Office/job title: Heuristic looks for all-uppercase lines
-
-## Common Patterns
-
-- **Launching browser with saved session**:
-  ```python
-  browser = p.chromium.launch(headless=False)
-  context = browser.new_context(storage_state="state.json")
-  ```
-
-- **Safe element extraction**:
-  ```python
-  def safe_text(locator):
-      try:
-          return locator.inner_text(timeout=1000).strip()
-      except:
-          return None
-  ```
-
-- **Filtering locators by email list**:
-  ```python
-  escaped_emails = [re.escape(email) for email in emails]
-  pattern = re.compile(r"^(?:" + "|".join(escaped_emails) + r")$", re.IGNORECASE)
-  email_tokens = email_tokens.filter(has_text=pattern)
-  ```
-
-## Key Dependencies
-
-- **playwright**: Browser automation framework (requires `playwright install` after pip install)
-- **openpyxl**: Library for reading/writing Excel files (.xlsx format)
-- Python 3.13 (as indicated by venv structure)
-
-## Project Structure
+## Entry Points (pyproject.toml)
 
 ```
-verificacion-correo/
-├── config.py                 # Configuración centralizada
-├── excel_reader.py           # Lectura de emails desde Excel
-├── contact_extractor.py      # Extracción de información de contacto
-├── browser_automation.py     # Automatización del navegador
-├── app.py                    # Script principal (punto de entrada)
-├── copiar_sesion.py          # Gestión de sesión
-├── examples/                 # Scripts de referencia y debugging
-│   ├── app_auto.py          # Versión monolítica con output detallado
-│   └── app_debug.py         # Script de debugging
-├── data/                     # Archivos de datos
-│   └── correos.xlsx         # Excel con emails a procesar
-├── state.json                # Sesión guardada (ignorar en git)
-└── .venv/                    # Entorno virtual (ignorar en git)
+verificacion-correo = "verificacion_correo.cli.main:main"
+vcorreo = "verificacion_correo.cli.main:main"
+verificacion-correo-gui = "verificacion_correo.gui.main:main"
 ```
 
-## Files to Ignore
+## Formato Excel
 
-- `state.json`: Contains session authentication data (already in .gitignore)
-- `.venv/`: Virtual environment directory
-- `data/`: Directory for storing data files including:
-  - `correos.xlsx`: Excel file containing email addresses to process (example file provided)
-- `examples/`: Scripts de referencia (app_auto.py, app_debug.py) y pruebas antiguas
-- `.chrome_user_data/`: Directorio de usuario de Chrome para Patchright (si existe)
+| Col | Header | Descripción |
+|-----|--------|-------------|
+| A | Correo | Email a procesar |
+| B | Status | OK / NO EXISTE / ERROR / "" |
+| C-J | Datos | Nombre, Email Personal, Teléfono, SIP, Dirección, Departamento, Compañía, Oficina |
 
-## Limitaciones Conocidas - Microsoft OWA Anti-Scraping
+Sistema incremental: solo procesa filas con Status vacío. `ExcelColumns` clase con definiciones.
 
-### Protección del Nombre de Usuario
+## Sesión OWA
 
-Microsoft OWA (Outlook Web Access) implementa medidas anti-scraping robustas que **previenen específicamente la extracción del nombre completo** del contacto cuando se detecta automatización.
+- Guardar: `verificacion-correo setup` → login manual en navegador
+- Archivo: `state.json` (Playwright storage_state con cookies)
+- La sesión expira tras ~40-50 llamadas API → HTTP 307 → `SessionExpiredError`
+- `_build_cookie_header()` extrae cookies del state.json
+- `_get_canary()` extrae `X-OWA-CANARY` de cookies o localStorage
 
-**Síntomas**:
-- El popup de tarjeta de contacto muestra el email del token (ej: "ASP164@MADRID.ORG") en lugar del nombre real ("SERRANO PEREZ, ANTONIO MANUEL")
-- Todos los demás campos se cargan correctamente
+## Patrones Importantes
 
-**Técnicas probadas SIN ÉXITO**:
-1. ✗ Playwright básico con configuración stealth
-2. ✗ **Patchright** - La librería anti-detección más avanzada (2025)
-   - Parchea Playwright a nivel de código fuente
-   - Evita fugas CDP (Chrome DevTools Protocol)
-   - channel="chrome", headless=False, no_viewport=True
-   - **Resultado**: OWA sigue detectando la automatización
+### Procesamiento API (api_extractor.py)
 
-**Conclusión**: Microsoft OWA tiene protección anti-bot a nivel del servidor que no se puede evadir con técnicas del lado del cliente.
+```python
+from verificacion_correo.core.api_extractor import find_people, process_emails_via_api
 
-### Datos que SÍ se Extraen Correctamente
+# Por email
+contact = find_people("user@madrid.org", "state.json")
 
-El script extrae exitosamente **8 de 9 campos**:
-- ✅ Email personal (ej: `antoniomanuel.serrano@madrid.org`)
-- ✅ Teléfono de trabajo (ej: `916704092`)
-- ✅ Dirección completa (ej: `C/ AYUNTAMIENTO, 5 28791 RIVAS-VACIAMADRID MADRID`)
-- ✅ Departamento (ej: `OFICINA JUDICIAL MUNICIPAL`)
-- ✅ Compañía (ej: `ORGANOS JUDICIALES`)
-- ✅ Ubicación de oficina (ej: `RIVAS-VACIAMADRID`)
-- ✅ Dirección SIP (ej: `sip:asp164@madrid.org`)
-- ✅ Token email (para identificación)
-- ❌ **Nombre completo** (bloqueado por OWA anti-scraping)
+# Batch desde Excel
+stats = process_emails_via_api("data/correos.xlsx", "state.json", batch_size=10)
+```
 
-### Alternativas para Obtener Nombres
+### GAL Scraper
 
-Si necesitas los nombres completos:
-1. Enriquecer los datos con una fuente externa (Active Directory, lista de empleados, etc.)
-2. Obtener los nombres manualmente de otra interfaz de OWA
-3. Usar el email personal para inferir el nombre (ej: `antoniomanuel.serrano@` → Antonio Manuel Serrano)
+```python
+from verificacion_correo.core.gal_scraper import scrape_gal
+
+stats = scrape_gal("state.json", output_dir="data/gal", max_contacts=0, batch_size=100)
+```
+
+### Sesión expirada
+
+```python
+from verificacion_correo.core.api_extractor import SessionExpiredError
+
+try:
+    contact = find_people(email, session_file)
+except SessionExpiredError:
+    # guardar progreso, pedir re-autenticación
+    break
+```
+
+### Thread safety para Playwright
+
+```python
+import asyncio
+old_loop = asyncio.get_event_loop()
+asyncio.set_event_loop(None)
+# ... operaciones Playwright ...
+asyncio.set_event_loop(old_loop)
+```
+
+## Limitaciones Conocidas
+
+- **Nombre bloqueado**: OWA anti-scraping server-side impide extraer DisplayName. Intentos con Patchright/stealth fallaron.
+- **Sesión caduca**: ~40 llamadas API antes de HTTP 307. El GAL scraper es reanudable.
+- **AddressListId fijo**: `fed75805-8ba2-4323-9f6d-80be7e3abc6a` para Madrid. Puede variar por organización.
+
+## Dependencias
+
+- playwright (solo para browser legacy)
+- openpyxl (lectura/escritura Excel)
+- pyyaml (config)
+- Python >= 3.8
+
+## Setup
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+playwright install chromium
+```
+
+## Tests
+
+```bash
+pytest
+pytest --cov=src --cov-report=html
+```
+
+## Archivos Legacy (no tocar)
+
+Los siguientes archivos en la raíz son legacy v1 y ya no se usan. El código activo está en `src/`:
+
+- `app.py`, `browser_automation.py`, `contact_extractor.py`, `config.py`, `excel_reader.py`, `excel_writer.py`, `copiar_sesion_old.py`, `debug_scraper.py`, `windows_compat.py`, `build_test.py`, `examples_old/`

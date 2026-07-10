@@ -5,7 +5,7 @@ Esta guía explica cómo usar la interfaz gráfica (GUI) para la verificación d
 ## 🚀 Inicio Rápido
 
 ### Requisitos Previos
-1. **Sesión activa**: Ejecuta `python copiar_sesion.py` primero para crear `state.json`
+1. **Sesión activa**: Ejecuta `verificacion-correo setup` primero para crear `state.json`
 2. **Archivo Excel**: Asegúrate de tener `data/correos.xlsx` con los correos a verificar
 3. **Configuración**: Revisa que `config.yaml` tenga la URL correcta de OWA
 
@@ -159,7 +159,7 @@ python -m verificacion_correo.gui.main
 
 ### Crear Sesión (antes de usar GUI)
 ```bash
-python copiar_sesion.py
+verificacion-correo setup
 ```
 
 ### Ver Ayuda CLI

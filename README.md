@@ -1,319 +1,185 @@
-# Verificación de Correos OWA v2.0
+# Verificación de Correos OWA
 
-Herramienta moderna de automatización Python que utiliza Playwright para interactuar con la interfaz webmail de Madrid (correoweb.madrid.org/owa) y extraer información de contactos de recipientes de correos electrónicos.
+Herramienta Python para extraer información de contacto del directorio OWA de Madrid (correoweb.madrid.org/owa). Soporta dos métodos de extracción: **API REST** (recomendado) y **Playwright** (legacy).
 
-## 🚀 Características Principales
+## Características
 
-- **🔧 Arquitectura Moderna**: Estructura `src/` con paquetes Python estándar 2025
-- **🧠 Automatización Inteligente**: Interactúa con OWA mediante Playwright
-- **📊 Extracción Robusta**: Extrae información de contacto con múltiples métodos (DOM + regex)
-- **⚡ Procesamiento por Lotes**: Procesamiento eficiente en lotes configurables
-- **🖥️ Doble Interfaz**: CLI potente y GUI intuitiva
-- **🔄 Sesión Persistente**: Reutilización de sesiones para evitar logins repetidos
-- **📈 Registro Detallado**: Logging estructurado y seguimiento de progreso
-- **🛠️ Configuración Flexible**: YAML + CLI + validación automática
+- **API REST** — Extracción vía FindPeople + GetPersona (Exchange Web Services). Rápido, sin navegador.
+- **GAL Scraper** — Extracción completa del directorio global (Global Address List) con paginación. Reanudable si la sesión expira.
+- **Playwright** — Método legacy que interactúa con la UI de OWA.
+- **Procesamiento incremental** — Solo procesa correos pendientes. Reanudable tras fallos de sesión.
+- **GUI + CLI** — Interfaz gráfica tkinter y línea de comandos completa.
+- **Sistema reanudable** — Detecta sesión expirada (HTTP 307) y guarda progreso.
 
-## 📋 Requisitos
+## Instalación
 
-- Python 3.8+ (recomendado 3.11+)
-- Navegador Chromium (instalado automáticamente por Playwright)
-
-## ⚙️ Instalación y Configuración
-
-### 1. Clonar el repositorio
 ```bash
 git clone https://github.com/AndresGaibor/verificacion-correo.git
 cd verificacion-correo
-```
-
-### 2. Crear entorno virtual
-```bash
 python3 -m venv .venv
-source .venv/bin/activate  # En Windows: .venv\Scripts\activate
-```
-
-### 3. Instalar el paquete
-```bash
-# Modo desarrollo (recomendado)
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -e .
-
-# O modo tradicional
-pip install -r requirements.txt
+pip install playwright openpyxl pyyaml
 playwright install chromium
 ```
 
-### 4. Configurar archivo de configuración
+## Uso Rápido
+
 ```bash
-# Si no existe, crear desde ejemplo
-cp config.yaml.example config.yaml
-```
-
-Edita `config.yaml` con tu configuración específica.
-
-### 5. Preparar archivo de datos
-Crea un archivo Excel con los emails a procesar:
-- Ubicación: `data/correos.xlsx` (o la ruta que prefieras)
-- Columna A: Direcciones de correo (fila 2 en adelante)
-- Fila 1: Encabezado "Correo"
-
-### 6. Establecer sesión de autenticación
-```bash
-# Configurar sesión interactiva
+# 1. Configurar sesión (login manual en navegador)
 verificacion-correo setup
 
-# O alternativamente
-python -m verificacion_correo setup
-```
-
-## 🔧 Uso
-
-### Modo CLI (Línea de Comandos)
-
-La nueva CLI incluye múltiples comandos y opciones:
-
-```bash
-# Procesar emails pendientes (comando por defecto)
+# 2. Procesar correos pendientes (vía Playwright)
 verificacion-correo
-verificacion-correo process
 
-# Verificar estado y validación
-verificacion-correo validate
-verificacion-correo status
+# 3. Procesar correos vía API REST (más rápido)
+verificacion-correo --api
 
-# Configurar sesión
-verificacion-correo setup
+# 4. Extraer todo el directorio GAL
+verificacion-correo scrape-gallery
 
-# Usar archivo Excel específico
-verificacion-correo --excel-file /path/to/emails.xlsx
-
-# Cambiar tamaño de lote
-verificacion-correo --batch-size 5
-
-# Modo verbose y archivo de log
-verificacion-correo -v --log-file processing.log
-
-# Vista previa sin procesar
-verificacion-correo --dry-run
-
-# Forzar procesamiento incluso con sesión inválida
-verificacion-correo --force
-```
-
-### Modo GUI (Interfaz Gráfica)
-
-```bash
-# Iniciar interfaz gráfica
+# 5. GUI
 verificacion-correo-gui
 ```
 
-La GUI incluye:
-- **📧 Pestaña de Procesamiento**: Control del procesamiento con barra de progreso
-- **🔐 Pestaña de Sesión**: Gestión y estado de la sesión del navegador
-- **⚙️ Pestaña de Configuración**: Información y acciones de configuración
-- **📊 Registro en tiempo real**: Eventos y progreso detallados
+## Comandos CLI
 
-## 📦 Estructura del Proyecto (v2.0)
+| Comando | Descripción |
+|---------|-------------|
+| `process` (default) | Procesa correos pendientes desde Excel |
+| `setup` | Configura sesión del navegador (login manual) |
+| `validate` | Valida configuración y preparación |
+| `status` | Muestra estado de sesión y archivos |
+| `scrape-gallery` | Extrae el directorio GAL completo vía API |
+
+### Opciones de `process`
+
+| Opción | Descripción |
+|--------|-------------|
+| `--excel-file PATH` | Archivo Excel específico |
+| `--batch-size N` | Tamaño de lote (default: 10) |
+| `--dry-run` | Vista previa sin procesar |
+| `--force` | Forzar aunque la sesión sea inválida |
+| `--keep-draft` | Mantener borrador abierto al terminar |
+
+### Opciones de `scrape-gallery`
+
+| Opción | Descripción |
+|--------|-------------|
+| `--output-dir DIR` | Directorio de salida (default: data/gal) |
+| `--max-contacts N` | Máx. contactos (0 = ilimitado) |
+| `--batch-size N` | Entradas por llamada API (default: 100) |
+| `--delay SEC` | Segundos entre peticiones (default: 8) |
+| `--force-restart` | Ignorar progreso guardado y empezar de cero |
+
+### Aliases
+
+```bash
+verificacion-correo   # CLI
+vcorreo               # Alias corto
+verificacion-correo-gui  # GUI
+```
+
+## Métodos de Extracción
+
+### API REST (Recomendado)
+
+Usa los servicios EWS `FindPeople` + `GetPersona` con las cookies de sesión. Dos pasos:
+
+1. **FindPeople** — Busca en el directorio por email, obtiene `PersonaId`
+2. **GetPersona** — Obtiene detalles completos (teléfono, dirección, departamento, SIP, etc.)
+
+Ventajas: sin navegador, más rápido, menos recursos.
+Implementación: `src/verificacion_correo/core/api_extractor.py`
+
+**Límite conocido**: La sesión OWA expira tras ~40-50 llamadas API (HTTP 307 → ADFS login). El sistema detecta esto, marca el error y los correos restantes quedan como pendientes para el siguiente ciclo.
+
+### Playwright (Legacy)
+
+Navega por la interfaz OWA: abre un nuevo mensaje, añade destinatarios, hace clic en tokens y extrae datos del popup de contacto.
+Implementación: `src/verificacion_correo/core/browser.py`
+
+### GAL Scraper
+
+Extracción paginada del directorio global (sin filtro, `QueryString: None`). Guarda progreso en `gal_progress.json` para reanudar si la sesión expira. Exporta a JSON + CSV.
+Implementación: `src/verificacion_correo/core/gal_scraper.py`
+
+## Datos Extraídos
+
+| Campo | Ejemplo |
+|-------|---------|
+| Email personal | nombre.apellido@madrid.org |
+| Teléfono | 916704092 |
+| Dirección | C/ AYUNTAMIENTO, 5 28791 RIVAS-VACIAMADRID |
+| Departamento | OFICINA JUDICIAL MUNICIPAL |
+| Compañía | ORGANOS JUDICIALES |
+| Oficina | RIVAS-VACIAMADRID |
+| SIP | sip:asp164@madrid.org |
+| **Nombre** | ❌ Bloqueado por anti-scraping de OWA |
+
+## Estructura del Proyecto
 
 ```
 verificacion-correo/
-├── src/verificacion_correo/           # Paquete principal
-│   ├── __init__.py                     # Inicialización del paquete
-│   ├── __main__.py                     # Entry point CLI
-│   ├── core/                          # Funcionalidades principales
-│   │   ├── config.py                   # Gestión de configuración
-│   │   ├── browser.py                  # Automatización del navegador
-│   │   ├── extractor.py                # Extracción de contactos
-│   │   ├── excel.py                    # Operaciones Excel
-│   │   └── session.py                 # Gestión de sesiones
-│   ├── cli/                           # Interfaz de línea de comandos
-│   │   └── main.py                    # CLI principal
-│   ├── gui/                           # Interfaz gráfica
-│   │   └── main.py                    # GUI principal
-│   └── utils/                         # Utilidades
-│       └── logging.py                  # Configuración de logging
-├── tests/                             # Suite de tests
-│   ├── test_core/                     # Tests de funcionalidad core
-│   └── test_integration/               # Tests de integración
-├── config/                            # Archivos de configuración
-│   └── default.yaml                   # Configuración por defecto
-├── data/                              # Directorio de datos
-│   └── correos.xlsx                   # Archivo Excel con emails
-├── pyproject.toml                      # Configuración moderna del paquete
-├── requirements.txt                    # Dependencias principales
-├── requirements-dev.txt                # Dependencias de desarrollo
-├── README.md                          # Documentación principal
-└── CLAUDE.md                          # Guía para Claude Code
+├── src/verificacion_correo/
+│   ├── __init__.py
+│   ├── __main__.py              # python -m verificacion_correo → CLI
+│   ├── core/
+│   │   ├── api_extractor.py      # Extracción vía FindPeople + GetPersona (API REST)
+│   │   ├── browser.py            # Automatización con Playwright
+│   │   ├── config.py             # Gestión de configuración YAML
+│   │   ├── excel.py              # Lectura/escritura Excel incremental
+│   │   ├── extractor.py          # Extracción de contactos desde popups OWA
+│   │   ├── first_run.py          # Configuración inicial automática
+│   │   ├── gal_scraper.py        # Scraper del directorio GAL (paginated FindPeople)
+│   │   └── session.py            # Gestión de sesiones del navegador
+│   ├── cli/
+│   │   └── main.py               # CLI con argparse (5 comandos)
+│   ├── gui/
+│   │   └── main.py               # GUI tkinter (4 pestañas)
+│   └── utils/
+│       └── logging.py            # Configuración de logging
+├── tests/
+│   ├── test_core/
+│   └── test_integration/
+├── config/
+│   └── default.yaml              # Configuración por defecto
+├── data/                         # Datos de entrada/salida
+│   └── correos.xlsx
+├── pyproject.toml
+├── start.bat                     # Launcher Windows
+├── setup_windows.bat             # Setup automático Windows
+└── CLAUDE.md                     # Guía para IA
 ```
 
-## 🔍 Comandos CLI Detallados
+## Formato Excel
 
-### `verificacion-correo process`
-Procesa emails pendientes desde el archivo Excel configurado.
+| Columna | Letra | Contenido |
+|---------|-------|-----------|
+| Correo | A | Email a procesar (input) |
+| Status | B | OK / NO EXISTE / ERROR / vacío (=pendiente) |
+| Nombre | C | Contact name |
+| Email Personal | D | Email real del contacto |
+| Teléfono | E | Número de trabajo |
+| SIP | F | Dirección SIP |
+| Dirección | G | Dirección postal |
+| Departamento | H | Departamento/Unidad |
+| Compañía | I | Organismo/Empresa |
+| Oficina | J | Ubicación de oficina |
 
-**Opciones:**
-- `--excel-file PATH`: Archivo Excel específico
-- `--batch-size N`: Tamaño de lote (default: 10)
-- `--dry-run`: Vista previa sin ejecutar
-- `--force`: Forzar procesamiento incluso con sesión inválida
+El sistema es **incremental**: solo procesa filas con Status vacío. Al terminar, escribe el resultado en la misma fila.
 
-### `verificacion-correo setup`
-Configura sesión de navegador interactiva.
-Abre una ventana para login manual y guarda el estado.
+## Limitaciones Conocidas
 
-### `verificacion-correo validate`
-Valida configuración y preparación del sistema:
-- ✅ Archivo de configuración válido
-- ✅ Sesión del navegador activa
-- ✅ Archivo Excel accesible
-- ✅ Emails pendientes disponibles
+- **Nombre bloqueado**: OWA anti-scraping impide extraer el nombre completo vía API y Playwright.
+- **Sesión efímera**: ~40-50 llamadas API antes de que OWA exija re-autenticación (HTTP 307 → ADFS).
+- **Anti-scraping server-side**: No se puede evadir con técnicas client-side (Patchright, stealth, etc.).
 
-### `verificacion-correo status`
-Muestra estado actual del sistema:
-- 🌐 Información de la sesión (cookies, orígenes, validez)
-- 📁 Estado del archivo Excel (existencia, tamaño, pendientes)
-- ⚙️ Configuración actual
-
-## 📊 Datos Extraídos
-
-La herramienta extrae exitosamente **8 de 9 campos**:
-
-- ✅ Email personal (ej: `nombre.apellido@madrid.org`)
-- ✅ Teléfono de trabajo (ej: `916704092`)
-- ✅ Dirección completa (ej: `C/ AYUNTAMIENTO, 5 28791 RIVAS-VACIAMADRID`)
-- ✅ Departamento (ej: `OFICINA JUDICIAL MUNICIPAL`)
-- ✅ Compañía (ej: `ORGANOS JUDICIALES`)
-- ✅ Ubicación de oficina (ej: `RIVAS-VACIAMADRID`)
-- ✅ Dirección SIP (ej: `sip:asp164@madrid.org`)
-- ✅ Token de email (para identificación)
-- ⚠️ **Nombre completo** (bloqueado por anti-scraping de Microsoft OWA)
-
-### Limitación del Nombre de Usuario
-
-Microsoft OWA implementa protección anti-bot que específicamente previene la extracción del nombre completo cuando se detecta automatización. Esta es una limitación conocida del lado del servidor y no puede evadirse con técnicas del lado del cliente.
-
-## 🛠️ Desarrollo
-
-### Configuración de Entorno de Desarrollo
+## Desarrollo
 
 ```bash
-# Instalar dependencias de desarrollo
-pip install -r requirements-dev.txt
-
-# Instalar en modo edición con dependencias de desarrollo
 pip install -e ".[dev]"
-
-# Formatear código
-black src/ tests/
-
-# Linting
-ruff check src/ tests/
-
-# Type checking
-mypy src/
-
-# Ejecutar tests
 pytest
-
-# Ejecutar tests con cobertura
-pytest --cov=src --cov-report=html
+ruff check src/
+black src/ tests/
 ```
-
-### Scripts Útiles
-
-```bash
-# Validar configuración del paquete
-python -m build --version
-
-# Crear distribución
-python -m build
-
-# Publicar en PyPI (para maintainer)
-python -m twine upload dist/*
-```
-
-## 🔄 Migración desde v1.0
-
-Si vienes de la versión anterior:
-
-1. **Reinstalar paquete**:
-   ```bash
-   pip install -e .
-   ```
-
-2. **Nuevos comandos**:
-   - `python app.py` → `verificacion-correo`
-   - `python copiar_sesion.py` → `verificacion-correo setup`
-   - `python -m verificacion_correo.gui.main` → `verificacion-correo-gui`
-
-3. **Configuración**:
-   - `config.yaml` sigue siendo compatible
-   - Nuevo `config/default.yaml` es la ubicación preferida
-
-## 🏗️ Builds Automáticos (GitHub Actions)
-
-El proyecto incluye workflows automáticos para:
-- **CI/CD**: Tests en múltiples versiones de Python
-- **Build Windows**: Ejecutable standalone para Windows
-- **Release Automático**: Publicación automática en GitHub Releases
-
-### Crear un Release
-
-```bash
-# Versión patch (v2.0.0 → v2.0.1)
-./scripts/release.sh
-
-# Versión minor (v2.0.0 → v2.1.0)
-./scripts/release.sh minor
-
-# Versión major (v2.0.0 → v3.0.0)
-./scripts/release.sh major
-```
-
-## 📝 Licencia
-
-Este proyecto está bajo licencia MIT. Ver el archivo `LICENSE` para más detalles.
-
-## 🤝 Contribuciones
-
-Las contribuciones son bienvenidas. Por favor:
-
-1. Fork del proyecto
-2. Crear un feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit de los cambios (`git commit -m 'Add some AmazingFeature'`)
-4. Push al branch (`git push origin feature/AmazingFeature`)
-5. Abrir un Pull Request
-
-## 📞 Soporte
-
-Si encuentras algún issue o tienes sugerencias:
-
-- 🐛 Crea un issue en GitHub
-- 📚 Revisa la documentación en `CLAUDE.md`
-- 💬 Contacta al maintainer
-
----
-
-**Desarrollado con ❤️ para automatización moderna de procesos de verificación de correos**
-
-## 📈 Historial de Cambios (v2.0)
-
-### ✨ Nuevas Características
-- **Arquitectura Moderna**: Estructura `src/` con paquetes estándar
-- **CLI Potente**: Múltiples comandos con validación y opciones
-- **GUI Mejorada**: Interfaz más intuitiva y robusta
-- **Logging Estructurado**: Configuración centralizada de logs
-- **Tests**: Suite básica de tests unitarios e integración
-- **Configuración Flexible**: Validación y fallbacks automáticos
-- **Documentación**: README actualizado y guía de desarrollo
-
-### 🔧 Mejoras Técnicas
-- **Type Hints**: Anotaciones de tipo en todo el código
-- **Error Handling**: Manejo robusto de errores
-- **Performance**: Optimización del procesamiento por lotes
-- **Maintenibility**: Código modular y bien documentado
-- **Standards**: Cumplimiento con Python Packaging Authority 2025
-
-### 🔄 Cambios Incompatibles
-- Los comandos CLI han cambiado (ver sección de migración)
-- La ubicación del código fuente ahora está en `src/`
-- Se requiere Python 3.8+ (antes 3.11+)
