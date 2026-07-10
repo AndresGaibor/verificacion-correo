@@ -1,5 +1,5 @@
 @echo off
-REM Activa el entorno virtual y ejecuta la GUI clasica de verificacion de correos
+REM Activa el entorno virtual y ejecuta la GUI de verificacion de correos
 call .venv\Scripts\activate
-python iniciar_gui.py
+python -m verificacion_correo.gui.main
 pause
