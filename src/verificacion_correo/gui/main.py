@@ -15,12 +15,14 @@ from typing import Optional, Dict, Any, Callable
 import yaml
 import asyncio
 import sys
+import json
 
 from verificacion_correo.core.config import Config
 from verificacion_correo.core.browser import BrowserAutomation
 from verificacion_correo.core.session import SessionManager, get_session_status
 from verificacion_correo.core.excel import ExcelReader, ExcelWriter
 from verificacion_correo.core.api_extractor import process_emails_via_api
+from verificacion_correo.core.gal_scraper import scrape_gal
 from verificacion_correo.utils.logging import setup_logging, get_logger
 
 
@@ -38,6 +40,7 @@ class GUIService:
         self.current_thread: Optional[threading.Thread] = None
         self.is_processing = False
         self.should_stop = False
+        self._gal_stop_flag: dict = {'stop': False}
 
     def validate_session(self) -> Dict[str, Any]:
         """Validate browser session."""
@@ -120,6 +123,53 @@ class GUIService:
 
         self.current_thread = threading.Thread(target=api_thread, daemon=True)
         self.current_thread.start()
+
+    def start_gal_scraping(
+        self,
+        output_dir: str,
+        max_contacts: int = 0,
+        force_restart: bool = False,
+    ) -> None:
+        """Start GAL directory scraping in background thread."""
+        if self.is_processing:
+            raise RuntimeError("Processing already active")
+
+        self.should_stop = False
+        self.is_processing = True
+
+        def gal_thread():
+            try:
+                session_file = self.config.get_session_file_path()
+                logger.info(f"Starting GAL scraping with session: {session_file}")
+
+                stop_flag = {'stop': False}
+                self._gal_stop_flag = stop_flag
+
+                def progress_callback(count, total):
+                    self.progress_queue.put(('gal_progress', {'count': count, 'total': total}))
+
+                result = scrape_gal(
+                    session_file=session_file,
+                    output_dir=output_dir,
+                    max_contacts=max_contacts,
+                    force_restart=force_restart,
+                    progress_callback=progress_callback,
+                    stop_flag=stop_flag,
+                )
+                self.progress_queue.put(('gal_complete', result))
+            except Exception as e:
+                logger.error(f"GAL scraping error: {e}")
+                self.progress_queue.put(('gal_error', str(e)))
+            finally:
+                self.is_processing = False
+
+        self.current_thread = threading.Thread(target=gal_thread, daemon=True)
+        self.current_thread.start()
+
+    def stop_gal_scraping(self):
+        """Signal the GAL scraper to stop."""
+        if hasattr(self, '_gal_stop_flag'):
+            self._gal_stop_flag['stop'] = True
 
     def check_queue(self):
         """Check for progress updates."""
@@ -590,7 +640,7 @@ class VerificacionCorreosGUI:
         self.scraper_status_label.config(text=message, foreground=color)
 
     def _start_scraper(self):
-        """Start the scraper in a background thread."""
+        """Start the GAL scraper via OWA API."""
         if self.scraper_active:
             self._add_scraper_log("⚠️ El scraper ya está activo")
             return
@@ -600,8 +650,34 @@ class VerificacionCorreosGUI:
             messagebox.showwarning("Cantidad Inválida", "La cantidad debe ser mayor a 0")
             return
 
+        # Check session
+        session_file = self.config.get_session_file_path()
+        if not Path(session_file).exists():
+            messagebox.showwarning(
+                "Sesión Requerida",
+                "No hay sesión guardada.\nEjecute 'copiar_sesion.py' primero."
+            )
+            return
+
+        # Confirm if resuming
+        output_dir = Path(self.scraper_output_dir.get()) / "gal"
+        progress_file = output_dir / "gal_progress.json"
+        if progress_file.exists():
+            with open(progress_file) as f:
+                prev = json.load(f)
+            resume = messagebox.askyesno(
+                "Reanudar Extracción",
+                f"Se encontró un progreso anterior:\n"
+                f"  Offset: {prev.get('offset', 0)}\n"
+                f"  Contactos: {prev.get('count', 0)}\n\n"
+                f"¿Desea reanudar desde donde se quedó?\n\n"
+                f"Seleccione 'No' para empezar desde cero."
+            )
+            force_restart = not resume
+        else:
+            force_restart = True
+
         # Reset variables
-        self.scraper_stop_flag['stop'] = False
         self.scraper_extracted_count.set(0)
         self._update_scraper_progress(0)
         self._update_scraper_total_label()
@@ -611,12 +687,21 @@ class VerificacionCorreosGUI:
         self.scraper_stop_btn.config(state='normal')
         self.scraper_active = True
 
-        self._add_scraper_log("🚀 Iniciando scraper...")
+        max_contacts = self.scraper_max_contacts.get()
+        self._add_scraper_log(f"🚀 Iniciando scraper (máx {max_contacts} contactos)...")
         self._update_scraper_status("🔄 Ejecutando...", "#3498db")
 
-        # Start scraper thread
-        self.scraper_thread = threading.Thread(target=self._run_scraper_thread, daemon=True)
-        self.scraper_thread.start()
+        try:
+            self.service.start_gal_scraping(
+                output_dir=str(output_dir),
+                max_contacts=max_contacts,
+                force_restart=force_restart,
+            )
+        except Exception as e:
+            self._add_scraper_log(f"❌ Error al iniciar: {e}")
+            self.scraper_start_btn.config(state='normal')
+            self.scraper_stop_btn.config(state='disabled')
+            self.scraper_active = False
 
     def _stop_scraper(self):
         """Stop the scraper gracefully."""
@@ -625,106 +710,10 @@ class VerificacionCorreosGUI:
 
         self._add_scraper_log("⚠️ Deteniendo scraper...")
         self._update_scraper_status("⏸️ Deteniendo...", "#e67e22")
-        self.scraper_stop_flag['stop'] = True
+        self.service.stop_gal_scraping()
         self.scraper_stop_btn.config(state='disabled')
 
-    def _run_scraper_thread(self):
-        """Run scraper in background thread."""
-        try:
-            # Create new event loop for this thread
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
-            # Run the scraper
-            loop.run_until_complete(self._run_scraper_async())
-
-        except Exception as e:
-            self.root.after(0, lambda: self._add_scraper_log(f"❌ Error: {str(e)}"))
-            logger.error(f"Error en scraper thread: {e}", exc_info=True)
-        finally:
-            if loop:
-                loop.close()
-
-            # Update UI
-            self.scraper_active = False
-            self.root.after(0, lambda: self.scraper_start_btn.config(state='normal'))
-            self.root.after(0, lambda: self.scraper_stop_btn.config(state='disabled'))
-
-            if self.scraper_stop_flag['stop']:
-                self.root.after(0, lambda: self._update_scraper_status("⏹️ Detenido", "#e67e22"))
-                self.root.after(0, lambda: self._add_scraper_log("⏹️ Scraper detenido por el usuario"))
-            else:
-                self.root.after(0, lambda: self._update_scraper_status("✅ Completado", "#27ae60"))
-                self.root.after(0, lambda: self._add_scraper_log("✅ Extracción completada"))
-
-    async def _run_scraper_async(self):
-        """Async function that runs the scraper."""
-        # Import scraper functions from project root
-        project_root = Path(__file__).parent.parent.parent.parent
-        sys.path.insert(0, str(project_root))
-
-        try:
-            from debug_scraper import DebugScraper, scrape_outlook_contacts
-
-            # Progress callback for GUI updates
-            def progress_callback(count):
-                self.root.after(0, lambda: self._update_scraper_progress(count))
-
-            scraper = DebugScraper(headless=False)
-
-            try:
-                # Log start
-                self.root.after(0, lambda: self._add_scraper_log("🔑 Iniciando sesión..."))
-
-                # Start session
-                await scraper.iniciar_sesion("https://correoweb.madrid.org/owa/#path=/people")
-
-                page = scraper.page
-                await page.wait_for_load_state("networkidle")
-
-                # Navigate to directory
-                self.root.after(0, lambda: self._add_scraper_log("📂 Navegando al directorio..."))
-                directorio = page.get_by_label("Directorio", exact=True).locator("div").filter(has_text="Directorio").nth(1)
-                await directorio.click()
-
-                # Extract contacts with callback
-                max_contacts = self.scraper_max_contacts.get()
-                self.root.after(0, lambda: self._add_scraper_log(f"🔍 Extrayendo {max_contacts} contactos..."))
-
-                # Change to output directory
-                output_dir = Path(self.scraper_output_dir.get())
-                output_dir.mkdir(exist_ok=True)
-
-                # Temporarily change directory for scraper
-                import os
-                original_dir = os.getcwd()
-                os.chdir(output_dir.parent)
-
-                try:
-                    await scrape_outlook_contacts(
-                        page,
-                        max_contacts=max_contacts,
-                        progress_callback=progress_callback,
-                        stop_flag=self.scraper_stop_flag
-                    )
-                finally:
-                    os.chdir(original_dir)
-
-                # Save session
-                if not self.scraper_stop_flag['stop']:
-                    await scraper.guardar_sesion()
-                    count = self.scraper_extracted_count.get()
-                    self.root.after(0, lambda: self._add_scraper_log(
-                        f"💾 {count} contactos guardados en {output_dir}"
-                    ))
-
-            finally:
-                await scraper.cerrar()
-
-        except Exception as e:
-            self.root.after(0, lambda: self._add_scraper_log(f"❌ Error: {str(e)}"))
-            logger.error(f"Error ejecutando scraper: {e}", exc_info=True)
-            raise
+    # _run_scraper_thread and _run_scraper_async removed — replaced by service.start_gal_scraping()
 
     def _create_config_editor(self, parent):
         """Create configuration editor interface."""
@@ -919,6 +908,12 @@ class VerificacionCorreosGUI:
                 self._handle_api_complete(data)
             elif item_type == 'api_error':
                 self._handle_api_error(data)
+            elif item_type == 'gal_progress':
+                self._update_gal_progress(data)
+            elif item_type == 'gal_complete':
+                self._handle_gal_complete(data)
+            elif item_type == 'gal_error':
+                self._handle_gal_error(data)
             elif item_type == 'progress':
                 self._update_progress(data)
 
@@ -1171,6 +1166,74 @@ Resultados guardados en: {self.excel_path_var.get()}"""
 
         messagebox.showerror("Error de Búsqueda API", f"Ocurrió un error:\n{error_msg}")
         self._add_log(f"❌ Error en búsqueda API: {error_msg}")
+
+    def _update_gal_progress(self, data):
+        """Update GAL scraper progress from background thread."""
+        count = data.get("count", 0)
+        total = data.get("total", 0) or 1
+        self.scraper_extracted_count.set(count)
+        self._update_scraper_progress(count)
+        if total > 0:
+            pct = (count / total) * 100
+            self.scraper_progress_bar["value"] = pct
+
+    def _handle_gal_complete(self, result):
+        """Handle GAL scraper completion."""
+        self.scraper_start_btn.config(state="normal")
+        self.scraper_stop_btn.config(state="disabled")
+        self.scraper_active = False
+
+        total = result.get("total", 0)
+        duration = result.get("duration", 0)
+        expired = result.get("expired", False)
+        stopped = result.get("stopped", False)
+        files = result.get("files", {})
+
+        self.scraper_extracted_count.set(total)
+        self._update_scraper_progress(total)
+
+        if expired:
+            self._update_scraper_status("⚠️ Sesión expirada", "#e67e22")
+            self._add_scraper_log(f"⚠️ Sesión expirada tras {total} contactos")
+            messagebox.showwarning(
+                "Sesión Expirada",
+                f"La sesión expiró después de {total} contactos.\n\n"
+                f"El progreso se ha guardado. Para continuar:\n"
+                f"1. Vuelva a iniciar sesión en OWA\n"
+                f"2. Ejecute 'copiar_sesion.py'\n"
+                f"3. Inicie la extracción nuevamente (se reanudará)\n\n"
+                f"📁 {files.get('json', '')}"
+            )
+        elif stopped:
+            self._update_scraper_status("⏹️ Detenido", "#e67e22")
+            self._add_scraper_log(f"⏹️ Scraper detenido ({total} contactos)")
+            messagebox.showinfo(
+                "Extracción Detenida",
+                f"Scraper detenido con {total} contactos.\n\n"
+                f"Resultados guardados en:\n"
+                f"  {files.get('json', '')}\n"
+                f"  {files.get('csv', '')}"
+            )
+        else:
+            self._update_scraper_status("✅ Completado", "#27ae60")
+            self._add_scraper_log(f"✅ Extracción completada: {total} contactos en {duration:.1f}s")
+            messagebox.showinfo(
+                "Extracción Completada",
+                f"Directorio completo extraído: {total} contactos\n\n"
+                f"Duración: {duration:.1f}s\n\n"
+                f"Resultados guardados en:\n"
+                f"  {files.get('json', '')}\n"
+                f"  {files.get('csv', '')}"
+            )
+
+    def _handle_gal_error(self, error_msg):
+        """Handle GAL scraper error."""
+        self.scraper_start_btn.config(state="normal")
+        self.scraper_stop_btn.config(state="disabled")
+        self.scraper_active = False
+        self._update_scraper_status("❌ Error", "#e74c3c")
+        self._add_scraper_log(f"❌ Error: {error_msg}")
+        messagebox.showerror("Error de Extracción", f"Ocurrió un error:\n{error_msg}")
 
     def _add_log(self, message):
         """Add message to log."""

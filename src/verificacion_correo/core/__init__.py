@@ -14,6 +14,7 @@ from verificacion_correo.core.browser import BrowserAutomation
 from verificacion_correo.core.extractor import ContactExtractor
 from verificacion_correo.core.excel import ExcelReader, ExcelWriter
 from verificacion_correo.core.session import SessionManager
+from verificacion_correo.core.gal_scraper import scrape_gal
 
 __all__ = [
     "Config",
@@ -22,4 +23,5 @@ __all__ = [
     "ExcelReader",
     "ExcelWriter",
     "SessionManager",
+    "scrape_gal",
 ]

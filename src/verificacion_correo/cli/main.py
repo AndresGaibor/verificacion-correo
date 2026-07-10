@@ -7,6 +7,7 @@ extraction from OWA, with multiple operation modes and options.
 
 import argparse
 import sys
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -15,6 +16,7 @@ from verificacion_correo.core.first_run import check_and_run_first_time_setup
 from verificacion_correo.core.browser import BrowserAutomation, process_emails
 from verificacion_correo.core.session import setup_session_interactive, validate_saved_session, get_session_status
 from verificacion_correo.core.excel import ExcelReader
+from verificacion_correo.core.gal_scraper import scrape_gal
 from verificacion_correo.utils.logging import setup_logging, get_logger
 
 
@@ -140,6 +142,42 @@ Examples:
             help="Show current status information"
         )
         status_parser.set_defaults(func=self._cmd_status)
+
+        # Scrape gallery command
+        gallery_parser = subparsers.add_parser(
+            "scrape-gallery",
+            help="Extract full GAL directory via OWA FindPeople API"
+        )
+        gallery_parser.add_argument(
+            "--output-dir",
+            type=str,
+            default="data/gal",
+            help="Output directory (default: data/gal)"
+        )
+        gallery_parser.add_argument(
+            "--max-contacts",
+            type=int,
+            default=0,
+            help="Max contacts to extract (0 = unlimited)"
+        )
+        gallery_parser.add_argument(
+            "--batch-size",
+            type=int,
+            default=100,
+            help="Entries per API call (default: 100)"
+        )
+        gallery_parser.add_argument(
+            "--delay",
+            type=float,
+            default=8.0,
+            help="Seconds between requests (default: 8.0)"
+        )
+        gallery_parser.add_argument(
+            "--force-restart",
+            action="store_true",
+            help="Ignore saved progress and start from scratch"
+        )
+        gallery_parser.set_defaults(func=self._cmd_scrape_gallery)
 
         # Default command is 'process'
         parser.set_defaults(func=lambda args: self._cmd_process(args))
@@ -333,6 +371,86 @@ Examples:
                 print(f"   Error reading: {e}")
         else:
             print("   Status: Not found")
+
+        return 0
+
+    def _cmd_scrape_gallery(self, args):
+        """Scrape full GAL directory command."""
+        print("=" * 70)
+        print("EXTRACCIÓN DEL DIRECTORIO (GAL) VÍA API")
+        print("=" * 70)
+
+        session_file = self.config.get_session_file_path()
+        if not Path(session_file).exists():
+            print("❌ No hay sesión guardada")
+            print("   Ejecute 'verificacion-correo setup' primero")
+            return 1
+
+        output_dir = args.output_dir
+        max_contacts = args.max_contacts
+        force_restart = args.force_restart
+
+        # Check progress file for resume
+        progress_file = Path(output_dir) / "gal_progress.json"
+        if progress_file.exists() and not force_restart:
+            with open(progress_file) as f:
+                prev = json.load(f)
+            print(f"\n⏳ Progreso anterior encontrado:")
+            print(f"   Offset: {prev.get('offset', 0)}")
+            print(f"   Contactos: {prev.get('count', 0)}")
+            print(f"   Última actualización: {prev.get('last_update', 'N/A')}")
+            try:
+                resp = input("\n¿Reanudar? [S/n]: ").strip().lower()
+                if resp in ("n", "no"):
+                    force_restart = True
+            except (EOFError, KeyboardInterrupt):
+                pass
+        else:
+            print(f"\n🆕 Nueva extracción desde cero")
+
+        print(f"\n📁 Directorio salida: {output_dir}")
+        print(f"📦 Batch size: {args.batch_size}")
+        print(f"⏱️  Delay: {args.delay}s")
+        if max_contacts > 0:
+            print(f"🎯 Máx contactos: {max_contacts}")
+        else:
+            print(f"🎯 Máx contactos: ilimitado")
+        if force_restart:
+            print("🔄 Forzando reinicio (ignorando progreso)")
+
+        try:
+            input("\nPresione ENTER para comenzar (Ctrl+C para cancelar)...")
+        except KeyboardInterrupt:
+            print("\nCancelado")
+            return 130
+
+        print("\n🚀 Iniciando extracción...\n")
+
+        stats = scrape_gal(
+            session_file=session_file,
+            output_dir=output_dir,
+            max_contacts=max_contacts,
+            batch_size=args.batch_size,
+            request_delay=args.delay,
+            force_restart=force_restart,
+        )
+
+        print("\n" + "=" * 70)
+        print("EXTRACCIÓN COMPLETADA")
+        print("=" * 70)
+        print(f"📧 Total contactos: {stats['total']}")
+        print(f"⏱️  Duración: {stats['duration']:.1f}s")
+
+        if stats['expired']:
+            print("⚠️  Sesión expirada — progreso guardado para reanudar")
+        elif stats['stopped']:
+            print("⏹️  Detenido por usuario")
+
+        files = stats.get('files', {})
+        print(f"📄 JSON: {files.get('json', 'N/A')}")
+        print(f"📄 CSV: {files.get('csv', 'N/A')}")
+        print(f"💾 Progreso: {files.get('progress', 'N/A')}")
+        print("=" * 70)
 
         return 0
 
