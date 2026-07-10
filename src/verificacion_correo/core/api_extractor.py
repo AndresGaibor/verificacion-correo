@@ -8,6 +8,7 @@ Two-step approach:
 
 import json
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from urllib.request import Request, urlopen
@@ -303,6 +304,7 @@ def process_emails_via_api(
     batch_size: int = 10,
     address_list_id: str = "fed75805-8ba2-4323-9f6d-80be7e3abc6a",
     request_delay: float = REQUEST_DELAY,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
 ) -> Dict[str, Any]:
     """Process all pending emails using FindPeople + GetPersona API."""
     start = time.time()
@@ -351,6 +353,9 @@ def process_emails_via_api(
 
             writer.write_result(record)
             total_processed += 1
+
+            if progress_callback:
+                progress_callback(total_processed, summary.pending_count)
 
         if session_expired:
             remaining_skipped = sum(len(b) for b in summary.batches[batch_num:]) + len(batch) - idx - 1

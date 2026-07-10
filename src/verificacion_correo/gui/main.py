@@ -69,7 +69,7 @@ class GUIService:
             logger.error(f"Excel summary error: {e}")
             return {'error': str(e)}
 
-    def start_processing(self, excel_path: str, progress_callback: Callable = None) -> None:
+    def start_processing(self, excel_path: str) -> None:
         """Start email processing in background thread."""
         if self.is_processing:
             raise RuntimeError("Processing already active")
@@ -79,14 +79,10 @@ class GUIService:
 
         def processing_thread():
             try:
-                # Use Playwright automation
                 logger.info("Using Playwright automation engine")
                 automation = BrowserAutomation(self.config)
-                stats = automation.process_emails(excel_path)
-
-                # Send completion signal
+                stats = automation.process_emails(excel_path, progress_callback=self._handle_progress)
                 self.progress_queue.put(('complete', stats))
-
             except Exception as e:
                 logger.error(f"Processing error: {e}")
                 self.progress_queue.put(('error', str(e)))
@@ -95,6 +91,10 @@ class GUIService:
 
         self.current_thread = threading.Thread(target=processing_thread, daemon=True)
         self.current_thread.start()
+
+    def _handle_progress(self, current: int, total: int):
+        """Handle progress updates from background threads."""
+        self.progress_queue.put(('progress', {'current': current, 'total': total}))
 
     def stop_processing(self):
         """Stop current processing."""
@@ -113,7 +113,7 @@ class GUIService:
             try:
                 session_file = self.config.get_session_file_path()
                 logger.info(f"Starting API search with session: {session_file}")
-                result = process_emails_via_api(excel_path, session_file)
+                result = process_emails_via_api(excel_path, session_file, progress_callback=self._handle_progress)
                 self.progress_queue.put(('api_complete', result))
             except Exception as e:
                 logger.error(f"API search error: {e}")
@@ -206,13 +206,10 @@ class VerificacionCorreosGUI:
         setup_logging(level="DEBUG")
         self.log_messages = []
         
-        # Scraper state variables
         self.scraper_output_dir = tk.StringVar(value=str(Path.cwd() / "data"))
         self.scraper_max_contacts = tk.IntVar(value=100)
         self.scraper_extracted_count = tk.IntVar(value=0)
         self.scraper_active = False
-        self.scraper_thread = None
-        self.scraper_stop_flag = {'stop': False}
         self.scraper_log_messages = []
 
         # Create interface
@@ -320,6 +317,28 @@ class VerificacionCorreosGUI:
 
         self.progress_text = tk.StringVar(value="Listo para procesar")
         ttk.Label(progress_frame, textvariable=self.progress_text).pack()
+
+        # Results section
+        results_frame = ttk.LabelFrame(main_frame, text="Resultados", padding=10)
+        results_frame.pack(fill='x', pady=(0, 10))
+
+        columns = ('correo', 'status', 'nombre', 'email_personal', 'telefono')
+        self.results_tree = ttk.Treeview(results_frame, columns=columns, show='headings', height=5)
+        self.results_tree.heading('correo', text='Correo')
+        self.results_tree.heading('status', text='Estado')
+        self.results_tree.heading('nombre', text='Nombre')
+        self.results_tree.heading('email_personal', text='Email Personal')
+        self.results_tree.heading('telefono', text='Teléfono')
+        self.results_tree.column('correo', width=200)
+        self.results_tree.column('status', width=80)
+        self.results_tree.column('nombre', width=150)
+        self.results_tree.column('email_personal', width=180)
+        self.results_tree.column('telefono', width=120)
+        self.results_tree.pack(fill='x')
+
+        results_scroll = ttk.Scrollbar(results_frame, orient='vertical', command=self.results_tree.yview)
+        self.results_tree.configure(yscrollcommand=results_scroll.set)
+        results_scroll.pack(side='right', fill='y')
 
         # Log section
         log_frame = ttk.LabelFrame(main_frame, text="Registro de Eventos", padding=10)
@@ -650,12 +669,11 @@ class VerificacionCorreosGUI:
             messagebox.showwarning("Cantidad Inválida", "La cantidad debe ser mayor a 0")
             return
 
-        # Check session
         session_file = self.config.get_session_file_path()
         if not Path(session_file).exists():
             messagebox.showwarning(
                 "Sesión Requerida",
-                "No hay sesión guardada.\nEjecute 'copiar_sesion.py' primero."
+                "No hay sesión guardada.\nUse el comando 'verificacion-correo setup' o el botón 'Configurar Sesión' en la pestaña de Sesión."
             )
             return
 
@@ -793,9 +811,8 @@ class VerificacionCorreosGUI:
 
     def _select_session_file(self):
         """Select session file for configuration."""
-        file_path = filedialog.asksaveasfilename(
+        file_path = filedialog.askopenfilename(
             title="Seleccionar archivo de sesión",
-            defaultextension=".json",
             filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
         )
         if file_path:
@@ -825,43 +842,47 @@ class VerificacionCorreosGUI:
         except Exception as e:
             messagebox.showerror("Error", f"Error al guardar configuración: {e}")
 
-    def _save_config_to_file(self):
-        """Save configuration to YAML file."""
-        config_data = {
-            'page_url': self.config.page_url,
-            'default_emails': self.config.default_emails,
+    @staticmethod
+    def _build_config_yaml(config: Config) -> dict:
+        """Build YAML-serializable dict from Config object."""
+        return {
+            'page_url': config.page_url,
+            'default_emails': config.default_emails,
             'browser': {
-                'headless': self.config.browser.headless,
-                'session_file': self.config.browser.session_file
+                'headless': config.browser.headless,
+                'session_file': config.browser.session_file
             },
             'excel': {
-                'default_file': self.config.excel.default_file,
-                'start_row': self.config.excel.start_row,
-                'email_column': self.config.excel.email_column
+                'default_file': config.excel.default_file,
+                'start_row': config.excel.start_row,
+                'email_column': config.excel.email_column
             },
             'processing': {
-                'batch_size': self.config.processing.batch_size,
-                'discard_draft': self.config.processing.discard_draft
+                'batch_size': config.processing.batch_size,
+                'discard_draft': config.processing.discard_draft
             },
             'selectors': {
-                'new_message_btn': self.config.selectors.new_message_btn,
-                'to_field_role': self.config.selectors.to_field_role,
-                'to_field_name': self.config.selectors.to_field_name,
-                'popup': self.config.selectors.popup,
-                'discard_btn': self.config.selectors.discard_btn
+                'new_message_btn': config.selectors.new_message_btn,
+                'to_field_role': config.selectors.to_field_role,
+                'to_field_name': config.selectors.to_field_name,
+                'popup': config.selectors.popup,
+                'discard_btn': config.selectors.discard_btn
             },
             'wait_times': {
-                'after_new_message': self.config.wait_times.after_new_message,
-                'after_fill_to': self.config.wait_times.after_fill_to,
-                'after_blur': self.config.wait_times.after_blur,
-                'popup_visible': self.config.wait_times.popup_visible,
-                'after_click_token': self.config.wait_times.after_click_token,
-                'popup_load_data': self.config.wait_times.popup_load_data,
-                'after_close_popup': self.config.wait_times.after_close_popup,
-                'before_discard': self.config.wait_times.before_discard
+                'after_new_message': config.wait_times.after_new_message,
+                'after_fill_to': config.wait_times.after_fill_to,
+                'after_blur': config.wait_times.after_blur,
+                'popup_visible': config.wait_times.popup_visible,
+                'after_click_token': config.wait_times.after_click_token,
+                'popup_load_data': config.wait_times.popup_load_data,
+                'after_close_popup': config.wait_times.after_close_popup,
+                'before_discard': config.wait_times.before_discard
             }
         }
 
+    def _save_config_to_file(self):
+        """Save configuration to YAML file."""
+        config_data = self._build_config_yaml(self.config)
         with open(self.config._config_path, 'w', encoding='utf-8') as f:
             yaml.dump(config_data, f, default_flow_style=False, allow_unicode=True)
 
@@ -917,13 +938,10 @@ class VerificacionCorreosGUI:
             elif item_type == 'progress':
                 self._update_progress(data)
 
-        # Check if processing is still active
-        if self.service.is_processing:
-            self.progress_bar.config(mode='indeterminate')
-            self.progress_bar.start(10)
-        else:
+        if not self.service.is_processing:
             self.progress_bar.stop()
-            self.progress_bar.config(mode='determinate')
+            if self.progress_bar['mode'] != 'determinate':
+                self.progress_bar.config(mode='determinate')
 
         # Schedule next check
         self.root.after(100, self._check_progress)
@@ -1048,6 +1066,7 @@ Resultados guardados en: {self.excel_path_var.get()}"""
         messagebox.showinfo("Procesamiento Completado", message)
         self._add_log(f"✅ Procesamiento completado: {success} exitosos, {not_found} no encontrados, {errors} errores")
         self._refresh_excel_info()
+        self._refresh_results_tree()
 
     def _processing_error(self, error_msg):
         """Handle processing error."""
@@ -1129,10 +1148,10 @@ Resultados guardados en: {self.excel_path_var.get()}"""
 ❌ No encontrados: {not_found}
 ⚠️ Errores (sesión): {errors}
 
-📌 Para continuar:
-   1. Cierra sesión y vuelve a iniciar en OWA
-   2. Ejecuta 'copiar_sesion.py' para refrescar la sesión
-   3. Vuelve a ejecutar la búsqueda
+            📌 Para continuar:
+                1. Cierra sesión y vuelve a iniciar en OWA
+                2. Usa 'Configurar Sesión' en la pestaña de Sesión
+                3. Vuelve a ejecutar la búsqueda
 
 Duración: {duration:.1f} segundos"""
 
@@ -1155,6 +1174,7 @@ Resultados guardados en: {self.excel_path_var.get()}"""
             self._add_log(f"✅ API search: {success} encontrados, {not_found} no encontrados, {errors} errores")
 
         self._refresh_excel_info()
+        self._refresh_results_tree()
 
     def _handle_api_error(self, error_msg):
         """Handle API search error in GUI thread."""
@@ -1200,7 +1220,7 @@ Resultados guardados en: {self.excel_path_var.get()}"""
                 f"La sesión expiró después de {total} contactos.\n\n"
                 f"El progreso se ha guardado. Para continuar:\n"
                 f"1. Vuelva a iniciar sesión en OWA\n"
-                f"2. Ejecute 'copiar_sesion.py'\n"
+                f"2. Use 'Configurar Sesión' en la pestaña de Sesión\n"
                 f"3. Inicie la extracción nuevamente (se reanudará)\n\n"
                 f"📁 {files.get('json', '')}"
             )
@@ -1235,11 +1255,16 @@ Resultados guardados en: {self.excel_path_var.get()}"""
         self._add_scraper_log(f"❌ Error: {error_msg}")
         messagebox.showerror("Error de Extracción", f"Ocurrió un error:\n{error_msg}")
 
+    MAX_LOG_MESSAGES = 1000
+
     def _add_log(self, message):
         """Add message to log."""
         timestamp = datetime.now().strftime("%H:%M:%S")
         log_entry = f"[{timestamp}] {message}\n"
         self.log_messages.append(log_entry)
+        if len(self.log_messages) > self.MAX_LOG_MESSAGES:
+            self.log_messages.pop(0)
+            self.log_text.delete('1.0', '2.0')
 
         self.log_text.insert(tk.END, log_entry)
         self.log_text.see(tk.END)
@@ -1289,7 +1314,7 @@ Resultados guardados en: {self.excel_path_var.get()}"""
 
                     if 'origins' in session_data:
                         status_text += f"Orígenes: {len(session_data.get('origins', []))}"
-                except:
+                except (json.JSONDecodeError, KeyError):
                     status_text += f"Válida: Error al leer"
             else:
                 status_text += f"Válida: No\n"
@@ -1330,8 +1355,6 @@ Resultados guardados en: {self.excel_path_var.get()}"""
 
     def _setup_playwright_session(self):
         """Set up Playwright (Chromium) session."""
-        import threading
-
         def setup_in_background():
             try:
                 success = self.service.setup_session()
@@ -1378,13 +1401,20 @@ Resultados guardados en: {self.excel_path_var.get()}"""
             return
 
         try:
-            # This would delete the session file
-            messagebox.showinfo(
-                "Eliminar Sesión",
-                "Use el comando CLI para eliminar la sesión:\n\n"
-                "Elimine el archivo state.json manualmente\n\n"
-                "Luego verifique la sesión en esta pestaña."
-            )
+            session_file = Path(self.config.get_session_file_path())
+            if session_file.exists():
+                session_file.unlink()
+                self._add_log("🗑️ Sesión eliminada correctamente")
+                messagebox.showinfo(
+                    "Sesión Eliminada",
+                    f"La sesión ha sido eliminada:\n{session_file}"
+                )
+            else:
+                messagebox.showinfo(
+                    "Sin Sesión",
+                    "No hay archivo de sesión para eliminar."
+                )
+            self._check_session_status()
 
         except Exception as e:
             messagebox.showerror("Error", f"Error al eliminar sesión: {e}")
@@ -1423,6 +1453,30 @@ Resultados guardados en: {self.excel_path_var.get()}"""
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo abrir la carpeta: {e}")
 
+    def _refresh_results_tree(self):
+        """Refresh results treeview from Excel file."""
+        for item in self.results_tree.get_children():
+            self.results_tree.delete(item)
+        try:
+            excel_path = self.excel_path_var.get()
+            if not excel_path or not Path(excel_path).exists():
+                return
+            from verificacion_correo.core.excel import ExcelReader, ProcessingStatus
+            reader = ExcelReader(excel_path)
+            records = reader.read_all_records()
+            for rec in records[-50:]:
+                status_char = '✅' if rec.status == ProcessingStatus.SUCCESS else ('❌' if rec.status == ProcessingStatus.ERROR else '⬜')
+                status_label = rec.status.value if hasattr(rec.status, 'value') else str(rec.status)
+                nombre = (rec.data or {}).get('name', '')
+                email_personal = (rec.data or {}).get('email', '')
+                telefono = (rec.data or {}).get('phone', '')
+                self.results_tree.insert('', 'end', values=(
+                    rec.email, f"{status_char} {status_label}",
+                    nombre[:40], email_personal[:40], telefono[:30]
+                ))
+        except Exception as e:
+            self._add_log(f"⚠️ No se pudieron cargar resultados: {e}")
+
     def _reload_config(self):
         """Reload configuration."""
         try:
@@ -1436,9 +1490,14 @@ Resultados guardados en: {self.excel_path_var.get()}"""
             messagebox.showerror("Error", f"Error al recargar configuración: {e}")
 
     def _update_progress(self, progress_data):
-        """Update progress information."""
-        # This would be called with progress updates from the service
-        pass
+        """Update progress bar with current/total info."""
+        current = progress_data.get('current', 0)
+        total = progress_data.get('total', 0) or 1
+        pct = (current / total) * 100
+        self.progress_var.set(pct)
+        self.progress_bar.config(mode='determinate')
+        self.progress_bar['value'] = pct
+        self.progress_text.set(f"Procesando: {current}/{total} ({pct:.0f}%)")
 
 
 class ConfigWizard:
@@ -1660,9 +1719,8 @@ La aplicación está lista para usar. Puedes:
 
     def _browse_session_file(self):
         """Browse for session file."""
-        file_path = filedialog.asksaveasfilename(
+        file_path = filedialog.askopenfilename(
             title="Seleccionar archivo de sesión",
-            defaultextension=".json",
             filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
         )
         if file_path:
@@ -1728,42 +1786,7 @@ La aplicación está lista para usar. Puedes:
             if hasattr(self, 'batch_size_var'):
                 self.config.processing.batch_size = self.batch_size_var.get()
 
-            # Save configuration
-            config_data = {
-                'page_url': self.config.page_url,
-                'default_emails': self.config.default_emails,
-                'browser': {
-                    'headless': self.config.browser.headless,
-                    'session_file': self.config.browser.session_file
-                },
-                'excel': {
-                    'default_file': self.config.excel.default_file,
-                    'start_row': self.config.excel.start_row,
-                    'email_column': self.config.excel.email_column
-                },
-                'processing': {
-                    'batch_size': self.config.processing.batch_size,
-                    'discard_draft': self.config.processing.discard_draft
-                },
-                'selectors': {
-                    'new_message_btn': self.config.selectors.new_message_btn,
-                    'to_field_role': self.config.selectors.to_field_role,
-                    'to_field_name': self.config.selectors.to_field_name,
-                    'popup': self.config.selectors.popup,
-                    'discard_btn': self.config.selectors.discard_btn
-                },
-                'wait_times': {
-                    'after_new_message': self.config.wait_times.after_new_message,
-                    'after_fill_to': self.config.wait_times.after_fill_to,
-                    'after_blur': self.config.wait_times.after_blur,
-                    'popup_visible': self.config.wait_times.popup_visible,
-                    'after_click_token': self.config.wait_times.after_click_token,
-                    'popup_load_data': self.config.wait_times.popup_load_data,
-                    'after_close_popup': self.config.wait_times.after_close_popup,
-                    'before_discard': self.config.wait_times.before_discard
-                }
-            }
-
+            config_data = VerificacionCorreosGUI._build_config_yaml(self.config)
             with open(self.config._config_path, 'w', encoding='utf-8') as f:
                 yaml.dump(config_data, f, default_flow_style=False, allow_unicode=True)
 
@@ -1781,11 +1804,12 @@ def main():
 
     # Set up modern styling if available
     try:
-        from tkinter import ttk
         style = ttk.Style()
         if 'clam' in style.theme_names():
             style.theme_use('clam')
-    except:
+        style.configure('Accent.TButton', font=('TkDefaultFont', 10, 'bold'))
+        style.configure('Treeview', rowheight=28)
+    except tk.TclError:
         pass
 
     app = VerificacionCorreosGUI(root)

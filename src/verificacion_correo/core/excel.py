@@ -240,6 +240,52 @@ class ExcelReader:
             logger.error(f"Error reading Excel file {self.file_path}: {e}")
             return []
 
+    def read_all_records(self) -> List[EmailRecord]:
+        """Read all records with their current status."""
+        if not self.file_path.exists():
+            return []
+
+        try:
+            wb = load_workbook(self.file_path, read_only=True, data_only=True)
+            ws = wb.active
+
+            records = []
+            for row in range(self.start_row, ws.max_row + 1):
+                email_cell = ws.cell(row=row, column=self.email_column)
+                status_cell = ws.cell(row=row, column=self.status_column)
+
+                email = email_cell.value
+                if email and '@' in str(email):
+                    email_str = str(email).strip()
+                    status_val = str(status_cell.value or '').strip()
+                    data = {}
+                    data_cols = {
+                        'name': 3, 'email': 4, 'phone': 5, 'sip': 6,
+                        'address': 7, 'department': 8, 'company': 9, 'office_location': 10
+                    }
+                    for field, col in data_cols.items():
+                        val = ws.cell(row=row, column=col).value
+                        if val:
+                            data[field] = str(val).strip()
+
+                    rec = EmailRecord(
+                        email=email_str,
+                        row=row,
+                        status=ProcessingStatus.PENDING if not status_val else (
+                            ProcessingStatus.SUCCESS if status_val == 'OK' else
+                            ProcessingStatus.ERROR
+                        ),
+                        data=data if data else None
+                    )
+                    records.append(rec)
+
+            wb.close()
+            return records
+
+        except Exception as e:
+            logger.error(f"Error reading all records: {e}")
+            return []
+
     def read_pending_emails(self, batch_size: int = 10) -> ExcelSummary:
         """
         Read pending emails and organize into batches.

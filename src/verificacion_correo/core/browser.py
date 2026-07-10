@@ -7,6 +7,7 @@ through the OWA interface, with batch processing and error handling.
 
 import re
 from typing import Dict, List, Any, Optional
+from collections.abc import Callable
 from dataclasses import dataclass
 from playwright.sync_api import sync_playwright, Page, TimeoutError as PWTimeout
 
@@ -62,7 +63,11 @@ class BrowserAutomation:
         self.contact_extractor = ContactExtractor(config)
         self.excel_writer = ExcelWriter(config.get_excel_file_path())
 
-    def process_emails(self, excel_file: Optional[str] = None) -> ProcessingStats:
+    def process_emails(
+        self,
+        excel_file: Optional[str] = None,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
+    ) -> ProcessingStats:
         """
         Process all pending emails from Excel file.
 
@@ -153,6 +158,9 @@ class BrowserAutomation:
 
                         # Write batch results to Excel
                         self.excel_writer.write_batch_results(result.records)
+
+                        if progress_callback:
+                            progress_callback(total_stats.total_emails, summary.pending_count)
 
                         logger.info(f"Batch {batch_num}/{len(summary.batches)} completed")
 
