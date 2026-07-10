@@ -10,6 +10,7 @@ from tkinter import ttk, scrolledtext, messagebox, filedialog
 import threading
 import queue
 import json
+import os
 import subprocess
 import platform
 from datetime import datetime
@@ -25,6 +26,32 @@ from verificacion_correo.gui.wizard import ConfigWizard
 
 
 logger = get_logger(__name__)
+
+
+class ToolTip:
+    """Tooltip helper for tkinter widgets."""
+    def __init__(self, widget, text):
+        self.widget = widget
+        self.text = text
+        self.tip_window = None
+        widget.bind('<Enter>', self._show)
+        widget.bind('<Leave>', self._hide)
+
+    def _show(self, event=None):
+        if self.tip_window or not self.text:
+            return
+        x = self.widget.winfo_rootx() + 20
+        y = self.widget.winfo_rooty() + 20
+        self.tip_window = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f"+{x}+{y}")
+        label = tk.Label(tw, text=self.text, background="#ffffe0", relief="solid", borderwidth=1, padx=4, pady=2)
+        label.pack()
+
+    def _hide(self, event=None):
+        if self.tip_window:
+            self.tip_window.destroy()
+        self.tip_window = None
 
 
 class VerificacionCorreosGUI:
@@ -55,18 +82,27 @@ class VerificacionCorreosGUI:
         self.scraper_output_dir = tk.StringVar(value=str(Path.cwd() / "data"))
         self.scraper_max_contacts = tk.IntVar(value=100)
         self.scraper_extracted_count = tk.IntVar(value=0)
+        self.is_processing = False
         self.scraper_active = False
         self.scraper_log_messages = []
 
         # Create interface
         self._create_widgets()
         self._setup_status_check()
+        self._setup_keyboard_shortcuts()
 
     def _create_widgets(self):
         """Create all GUI widgets."""
         # Create main container with padding
         main_container = ttk.Frame(self.root)
         main_container.pack(fill='both', expand=True, padx=10, pady=10)
+
+        # Create menu bar
+        menubar = tk.Menu(self.root)
+        self.root.config(menu=menubar)
+        help_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Ayuda", menu=help_menu)
+        help_menu.add_command(label="Acerca de...", command=self._show_about)
 
         # Create notebook for tabs
         self.notebook = ttk.Notebook(main_container)
@@ -80,6 +116,9 @@ class VerificacionCorreosGUI:
 
         # Create status bar
         self._create_status_bar(main_container)
+
+        # Bind tab change
+        self.notebook.bind('<<NotebookTabChanged>>', self._on_tab_changed)
 
     def _create_processing_tab(self):
         """Create processing tab."""
@@ -97,7 +136,7 @@ class VerificacionCorreosGUI:
         self.excel_path_var = tk.StringVar(value=str(self.config.get_excel_file_path()))
         ttk.Entry(file_frame, textvariable=self.excel_path_var, width=60).pack(side='left', padx=(0, 5))
         ttk.Button(file_frame, text="Seleccionar", command=self._select_excel_file).pack(side='left')
-        ttk.Button(file_frame, text="Refrescar", command=self._refresh_excel_info).pack(side='left', padx=(5, 0))
+        btn_refrescar = ttk.Button(file_frame, text="Refrescar", command=self._refresh_excel_info).pack(side='left', padx=(5, 0))
 
         # Summary section
         summary_frame = ttk.LabelFrame(main_frame, text="Resumen", padding=10)
@@ -126,6 +165,7 @@ class VerificacionCorreosGUI:
             style='Accent.TButton'
         )
         self.start_btn.pack(side='left', padx=(0, 5))
+        ToolTip(self.start_btn, "Inicia el procesamiento de correos pendientes (Ctrl+Enter)")
 
         self.stop_btn = ttk.Button(
             control_frame,
@@ -134,12 +174,15 @@ class VerificacionCorreosGUI:
             state='disabled'
         )
         self.stop_btn.pack(side='left', padx=5)
+        ToolTip(self.stop_btn, "Detiene el procesamiento en curso (Escape)")
 
-        ttk.Button(
+        btn_ver = ttk.Button(
             control_frame,
             text="📊 Ver Resultados",
             command=self._open_excel_file
-        ).pack(side='left', padx=(5, 0))
+        )
+        btn_ver.pack(side='left', padx=(5, 0))
+        ToolTip(btn_ver, "Abre el archivo Excel con los resultados")
 
         self.api_btn = ttk.Button(
             control_frame,
@@ -147,6 +190,7 @@ class VerificacionCorreosGUI:
             command=self._start_api_search
         )
         self.api_btn.pack(side='left', padx=(5, 0))
+        ToolTip(self.api_btn, "Busca contactos en el directorio OWA vía API REST")
 
         # Progress section
         progress_frame = ttk.LabelFrame(main_frame, text="Progreso", padding=10)
@@ -224,23 +268,29 @@ class VerificacionCorreosGUI:
         action_frame = ttk.Frame(main_frame)
         action_frame.pack(fill='x', pady=(0, 10))
 
-        ttk.Button(
+        btn_verificar = ttk.Button(
             action_frame,
             text="🔄 Verificar Sesión",
             command=self._check_session_status
-        ).pack(side='left', padx=(0, 5))
+        )
+        btn_verificar.pack(side='left', padx=(0, 5))
+        ToolTip(btn_verificar, "Verifica el estado actual de la sesión OWA")
 
-        ttk.Button(
+        btn_configurar = ttk.Button(
             action_frame,
             text="🔧 Configurar Sesión",
             command=self._setup_session
-        ).pack(side='left', padx=5)
+        )
+        btn_configurar.pack(side='left', padx=5)
+        ToolTip(btn_configurar, "Abre navegador para iniciar sesión en OWA")
 
-        ttk.Button(
+        btn_eliminar = ttk.Button(
             action_frame,
             text="🗑️ Eliminar Sesión",
             command=self._delete_session
-        ).pack(side='left', padx=(5, 0))
+        )
+        btn_eliminar.pack(side='left', padx=(5, 0))
+        ToolTip(btn_eliminar, "Elimina la sesión guardada (requiere re-autenticación)")
 
         # Session info
         info_frame = ttk.LabelFrame(main_frame, text="Información de la Sesión", padding=10)
@@ -274,29 +324,37 @@ class VerificacionCorreosGUI:
         action_frame = ttk.Frame(main_frame)
         action_frame.pack(fill='x', pady=(0, 10))
 
-        ttk.Button(
+        btn_guardar = ttk.Button(
             action_frame,
             text="💾 Guardar Configuración",
             command=self._save_config
-        ).pack(side='left', padx=(0, 5))
+        )
+        btn_guardar.pack(side='left', padx=(0, 5))
+        ToolTip(btn_guardar, "Guarda la configuración actual (Ctrl+S)")
 
-        ttk.Button(
+        btn_reargar = ttk.Button(
             action_frame,
             text="🔄 Recargar Configuración",
             command=self._reload_config
-        ).pack(side='left', padx=(5, 0))
+        )
+        btn_reargar.pack(side='left', padx=(5, 0))
+        ToolTip(btn_reargar, "Recarga la configuración desde el archivo")
 
-        ttk.Button(
+        btn_carpeta = ttk.Button(
             action_frame,
             text="📁 Abrir Carpeta de Datos",
             command=self._open_data_folder
-        ).pack(side='left', padx=(5, 0))
+        )
+        btn_carpeta.pack(side='left', padx=(5, 0))
+        ToolTip(btn_carpeta, "Abre la carpeta donde se guardan los datos")
 
-        ttk.Button(
+        btn_asistente = ttk.Button(
             action_frame,
             text="🔧 Asistente de Configuración",
             command=self._run_config_wizard
-        ).pack(side='left', padx=(5, 0))
+        )
+        btn_asistente.pack(side='left', padx=(5, 0))
+        ToolTip(btn_asistente, "Abre el asistente de configuración inicial")
 
     def _create_scraper_tab(self):
         """Create scraper tab for extracting Outlook contacts."""
@@ -339,12 +397,15 @@ class VerificacionCorreosGUI:
         quantity_frame = ttk.Frame(config_frame)
         quantity_frame.pack(fill='x')
 
+        vcmd_scraper = (self.root.register(self._validate_numeric), '%P')
         ttk.Spinbox(
             quantity_frame,
             from_=1,
             to=10000,
             textvariable=self.scraper_max_contacts,
-            width=20
+            width=20,
+            validate='key',
+            validatecommand=vcmd_scraper
         ).pack(anchor='w')
 
         # Control section
@@ -361,6 +422,7 @@ class VerificacionCorreosGUI:
             style='Accent.TButton'
         )
         self.scraper_start_btn.pack(side='left', padx=(0, 5), fill='x', expand=True)
+        ToolTip(self.scraper_start_btn, "Inicia la extracción del directorio GAL (Ctrl+Shift+Enter)")
 
         self.scraper_stop_btn = ttk.Button(
             button_frame,
@@ -369,6 +431,15 @@ class VerificacionCorreosGUI:
             state='disabled'
         )
         self.scraper_stop_btn.pack(side='left', fill='x', expand=True)
+        ToolTip(self.scraper_stop_btn, "Detiene la extracción en curso (Escape)")
+
+        btn_abrir_resultados = ttk.Button(
+            button_frame,
+            text="📂 Abrir resultados",
+            command=self._open_scraper_output
+        )
+        btn_abrir_resultados.pack(side='left', padx=(5, 0))
+        ToolTip(btn_abrir_resultados, "Abre la carpeta con los resultados de extracción")
 
         # Progress section
         progress_frame = ttk.LabelFrame(main_frame, text="Progreso de Extracción", padding=10)
@@ -572,6 +643,9 @@ class VerificacionCorreosGUI:
         if not self.scraper_active:
             return
 
+        if not messagebox.askyesno("Detener", "¿Estás seguro de que deseas detener la extracción?"):
+            return
+
         self._add_scraper_log("⚠️ Deteniendo scraper...")
         self._update_scraper_status("⏸️ Deteniendo...", "#e67e22")
         self.service.stop_gal_scraping()
@@ -595,7 +669,9 @@ class VerificacionCorreosGUI:
         # Batch size
         ttk.Label(basic_frame, text="Tamaño de lote:").grid(row=1, column=0, sticky='w', padx=5, pady=5)
         self.batch_size_var = tk.IntVar(value=self.config.processing.batch_size)
-        ttk.Entry(basic_frame, textvariable=self.batch_size_var, width=10).grid(row=1, column=1, padx=5, pady=5, sticky='w')
+        vcmd = (self.root.register(self._validate_numeric), '%P')
+        batch_size_entry = ttk.Entry(basic_frame, textvariable=self.batch_size_var, width=10, validate='key', validatecommand=vcmd)
+        batch_size_entry.grid(row=1, column=1, padx=5, pady=5, sticky='w')
 
         # Excel file
         ttk.Label(basic_frame, text="Archivo Excel:").grid(row=2, column=0, sticky='w', padx=5, pady=5)
@@ -701,6 +777,14 @@ class VerificacionCorreosGUI:
         self.status_label = ttk.Label(status_frame, text="Listo")
         self.status_label.pack(side='left')
 
+        # Pending count label
+        self.pending_label = ttk.Label(status_frame, text="", foreground='gray')
+        self.pending_label.pack(side='left', padx=(20, 0))
+
+        # Session status label
+        self.session_indicator = ttk.Label(status_frame, text="", foreground='gray')
+        self.session_indicator.pack(side='left', padx=(20, 0))
+
         # Clock label
         self.clock_label = ttk.Label(status_frame)
         self.clock_label.pack(side='right')
@@ -783,6 +867,9 @@ class VerificacionCorreosGUI:
                     state='normal' if summary['pending_count'] > 0 else 'disabled'
                 )
 
+                # Update pending count in status bar
+                self.pending_label.config(text=f"Pendientes: {summary['pending_count']}")
+
         except Exception as e:
             self.summary_text.set(f"Error: {e}")
             self.start_btn.config(state='disabled')
@@ -819,12 +906,15 @@ class VerificacionCorreosGUI:
             self.progress_text.set("Iniciando procesamiento...")
             self._add_log("🚀 Iniciando procesamiento de correos")
             self.status_label.config(text="Procesando...")
+            self.is_processing = True
 
         except Exception as e:
             messagebox.showerror("Error", f"Error al iniciar procesamiento: {e}")
 
     def _stop_processing(self):
         """Stop email processing."""
+        if not messagebox.askyesno("Detener", "¿Estás seguro de que deseas detener el procesamiento?"):
+            return
         try:
             self.service.stop_processing()
             self.start_btn.config(state='normal')
@@ -846,6 +936,7 @@ class VerificacionCorreosGUI:
         self.stop_btn.config(state='disabled')
         self.progress_text.set("Procesamiento completado")
         self.status_label.config(text="Completado")
+        self.is_processing = False
 
         # Show results
         total = stats.total_emails
@@ -867,6 +958,10 @@ Resultados guardados en: {self.excel_path_var.get()}"""
         self._add_log(f"✅ Procesamiento completado: {success} exitosos, {not_found} no encontrados, {errors} errores")
         self._refresh_excel_info()
         self._refresh_results_tree()
+        self._save_run_history("playwright", {
+            "total": total, "success": success, "not_found": not_found,
+            "errors": errors, "duration": stats.duration_seconds
+        })
 
     def _processing_error(self, error_msg):
         """Handle processing error."""
@@ -878,6 +973,7 @@ Resultados guardados en: {self.excel_path_var.get()}"""
         self.stop_btn.config(state='disabled')
         self.progress_text.set("Error en procesamiento")
         self.status_label.config(text="Error")
+        self.is_processing = False
 
         messagebox.showerror("Error de Procesamiento", f"Ocurrió un error:\n{error_msg}")
         self._add_log(f"❌ Error de procesamiento: {error_msg}")
@@ -916,6 +1012,7 @@ Resultados guardados en: {self.excel_path_var.get()}"""
             self.progress_text.set("Buscando contactos por API...")
             self._add_log("🔍 Iniciando búsqueda de contactos vía API de OWA")
             self.status_label.config(text="Buscando...")
+            self.is_processing = True
 
         except Exception as e:
             messagebox.showerror("Error", f"Error al iniciar búsqueda API: {e}")
@@ -925,6 +1022,9 @@ Resultados guardados en: {self.excel_path_var.get()}"""
         self.start_btn.config(state='normal')
         self.api_btn.config(state='normal')
         self.stop_btn.config(state='disabled')
+        self.progress_var.set(0)
+        self.progress_bar['value'] = 0
+        self.is_processing = False
 
         total = result.get("total", 0)
         success = result.get("success", 0)
@@ -975,12 +1075,19 @@ Resultados guardados en: {self.excel_path_var.get()}"""
 
         self._refresh_excel_info()
         self._refresh_results_tree()
+        self._save_run_history("api", {
+            "total": total, "success": success, "not_found": not_found,
+            "errors": errors, "duration": duration
+        })
 
     def _handle_api_error(self, error_msg):
         """Handle API search error in GUI thread."""
         self.start_btn.config(state='normal')
         self.api_btn.config(state='normal')
         self.stop_btn.config(state='disabled')
+        self.progress_var.set(0)
+        self.progress_bar['value'] = 0
+        self.is_processing = False
         self.progress_text.set("Error en búsqueda API")
         self.status_label.config(text="Error")
 
@@ -1045,6 +1152,11 @@ Resultados guardados en: {self.excel_path_var.get()}"""
                 f"  {files.get('json', '')}\n"
                 f"  {files.get('csv', '')}"
             )
+
+        self._save_run_history("gal", {
+            "total": total, "duration": duration, "expired": expired,
+            "stopped": stopped, "files": files
+        })
 
     def _handle_gal_error(self, error_msg):
         """Handle GAL scraper error."""
@@ -1117,6 +1229,13 @@ Resultados guardados en: {self.excel_path_var.get()}"""
                 status_text += f"Usa 'Configurar Sesión' para crear una"
 
             self.session_status_text.set(status_text)
+
+            # Update session indicator in status bar
+            session_file = Path(self.config.get_session_file_path())
+            if session_file.exists():
+                self.session_indicator.config(text="🟢 Sesión OK", foreground='#27ae60')
+            else:
+                self.session_indicator.config(text="🔴 Sin sesión", foreground='#e74c3c')
 
             # Update session info text
             self.session_info_text.config(state='normal')
@@ -1279,6 +1398,86 @@ Resultados guardados en: {self.excel_path_var.get()}"""
             self._check_session_status()
         except Exception as e:
             messagebox.showerror("Error", f"Error al recargar configuración: {e}")
+
+    def _setup_keyboard_shortcuts(self):
+        """Setup keyboard shortcuts."""
+        self.root.bind('<Control-Return>', lambda e: self._start_processing() if not self.is_processing else None)
+        self.root.bind('<Escape>', lambda e: self._stop_processing() if self.is_processing else None)
+        self.root.bind('<Control-s>', lambda e: self._save_config())
+        self.root.bind('<Control-Shift-Return>', lambda e: self._start_scraper())
+
+    def _validate_numeric(self, value_if_allowed):
+        """Validate numeric input for Entry/Spinbox."""
+        if value_if_allowed == "":
+            return True
+        try:
+            int(value_if_allowed)
+            return True
+        except ValueError:
+            return False
+
+    def _show_about(self):
+        """Show About dialog."""
+        from verificacion_correo import __version__
+        messagebox.showinfo(
+            "Acerca de Verificación de Correos",
+            "Verificación de Correos OWA\n"
+            "Versión: {}\n\n"
+            "Herramienta de automatización para extracción de contactos desde OWA Madrid.\n\n"
+            "Atajos:\n"
+            "  Ctrl+Enter        - Iniciar procesamiento\n"
+            "  Escape            - Detener procesamiento\n"
+            "  Ctrl+S            - Guardar configuración\n"
+            "  Ctrl+Shift+Enter  - Iniciar extracción GAL".format(__version__)
+        )
+
+    def _open_scraper_output(self):
+        """Open scraper output directory in file explorer."""
+        output_dir = Path(self.config.get_excel_file_path()).parent / "gal"
+        if output_dir.exists():
+            if platform.system() == 'Darwin':
+                subprocess.run(['open', str(output_dir)])
+            elif platform.system() == 'Windows':
+                os.startfile(str(output_dir))
+            else:
+                subprocess.run(['xdg-open', str(output_dir)])
+        else:
+            messagebox.showinfo("Sin resultados", "No hay resultados de extracción aún. Ejecuta el scraper primero.")
+
+    def _on_tab_changed(self, event=None):
+        """Handle notebook tab change."""
+        tab_id = self.notebook.select()
+        if tab_id:
+            tab_index = self.notebook.index(tab_id)
+            tab_names = ["Procesamiento", "Sesión", "Configuración", "Scraper"]
+            if tab_index < len(tab_names):
+                self._update_status("Pestaña: {}".format(tab_names[tab_index]))
+
+    def _update_status(self, message):
+        """Update status bar message."""
+        self.status_label.config(text=message)
+
+    def _save_run_history(self, run_type, stats):
+        """Save run history to JSON file."""
+        history_file = Path(self.config.get_excel_file_path()).parent / "run_history.json"
+        history = []
+        if history_file.exists():
+            try:
+                with open(history_file) as f:
+                    history = json.load(f)
+            except (json.JSONDecodeError, IOError):
+                pass
+        history.append({
+            "type": run_type,
+            "timestamp": datetime.now().isoformat(),
+            "stats": stats
+        })
+        history = history[-20:]
+        try:
+            with open(history_file, 'w') as f:
+                json.dump(history, f, indent=2, default=str)
+        except IOError:
+            pass
 
     def _update_progress(self, progress_data):
         """Update progress bar with current/total info."""
