@@ -46,3 +46,6 @@ dist/
 # Archivos del sistema operativo
 .DS_Store
 Thumbs.db
+
+# Lock files (uv no es el gestor principal del proyecto)
+uv.lock

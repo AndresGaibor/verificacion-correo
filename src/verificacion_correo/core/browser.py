@@ -287,16 +287,24 @@ class BrowserAutomation:
         page.wait_for_timeout(self.config.wait_times.after_new_message)
 
     def _add_emails_to_field(self, page: Page, emails: List[str]):
-        """Add email addresses to the 'To' field."""
-        emails_str = ";".join(emails)
-        input_box = page.get_by_role(
-            self.config.selectors.to_field_role,
-            name=self.config.selectors.to_field_name
-        )
-        input_box.fill(emails_str)
-        page.wait_for_timeout(self.config.wait_times.after_fill_to)
-        input_box.blur()
-        page.wait_for_timeout(self.config.wait_times.after_blur)
+        """Add email addresses to the 'To' field one by one."""
+        para_input = page.locator('input[aria-label="Para"]')
+
+        for i, email in enumerate(emails):
+            para_input.click()
+            page.wait_for_timeout(300)
+            page.keyboard.type(email, delay=30)
+            page.wait_for_timeout(1500)
+            page.keyboard.press("Tab")
+            page.wait_for_timeout(self.config.wait_times.after_fill_to)
+
+            if i == 0:
+                debug_path = f"debug_screenshots/after_first_email.png"
+                try:
+                    page.screenshot(path=debug_path)
+                    logger.debug(f"Debug screenshot saved to: {debug_path}")
+                except Exception as e:
+                    logger.debug(f"Could not save debug screenshot: {e}")
 
     def _process_single_email(self, page: Page, record: EmailRecord, batch_result: BatchResult):
         """Process a single email record."""
@@ -342,20 +350,37 @@ class BrowserAutomation:
             batch_result.records.append(record)
 
     def _find_email_token(self, page: Page, email: str):
-        """Find the email token in the interface."""
+        """Find the email token by image src or position."""
         try:
-            # Create a regex pattern for exact email match
-            pattern = re.compile(f'^{re.escape(email)}$', re.I)
+            email_lower = email.lower()
+            token = page.locator(f'div._rw_l')
+            count = token.count()
 
-            # Find spans that contain the email text
-            email_span = page.locator(f'span:has-text("{email}")').filter(
-                has_text=pattern
-            )
-
-            if email_span.count() > 0:
-                return email_span.first
-            else:
+            if count == 0:
                 return None
+
+            # First try to find by image src containing the email
+            for i in range(count):
+                try:
+                    img = token.nth(i).locator(f'img[src*="{email_lower}"]')
+                    if img.count() > 0:
+                        logger.debug(f"Found token by image src for: {email}")
+                        return token.nth(i)
+                except Exception:
+                    continue
+
+            # Fallback: search in title attribute and inner text
+            for i in range(count):
+                try:
+                    title = token.nth(i).get_attribute('title') or ''
+                    inner = token.nth(i).inner_text()
+                    if email_lower in title.lower() or email_lower in inner.lower():
+                        logger.debug(f"Found token by title/text for: {email}")
+                        return token.nth(i)
+                except Exception:
+                    continue
+
+            return None
 
         except Exception as e:
             logger.debug(f"Error finding email token for {email}: {e}")

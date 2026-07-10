@@ -20,6 +20,7 @@ from verificacion_correo.core.config import Config
 from verificacion_correo.core.browser import BrowserAutomation
 from verificacion_correo.core.session import SessionManager, get_session_status
 from verificacion_correo.core.excel import ExcelReader, ExcelWriter
+from verificacion_correo.core.api_extractor import process_emails_via_api
 from verificacion_correo.utils.logging import setup_logging, get_logger
 
 
@@ -96,6 +97,29 @@ class GUIService:
         """Stop current processing."""
         self.should_stop = True
         self.is_processing = False
+
+    def start_api_processing(self, excel_path: str) -> None:
+        """Start API-based contact search in background thread."""
+        if self.is_processing:
+            raise RuntimeError("Processing already active")
+
+        self.should_stop = False
+        self.is_processing = True
+
+        def api_thread():
+            try:
+                session_file = self.config.get_session_file_path()
+                logger.info(f"Starting API search with session: {session_file}")
+                result = process_emails_via_api(excel_path, session_file)
+                self.progress_queue.put(('api_complete', result))
+            except Exception as e:
+                logger.error(f"API search error: {e}")
+                self.progress_queue.put(('api_error', str(e)))
+            finally:
+                self.is_processing = False
+
+        self.current_thread = threading.Thread(target=api_thread, daemon=True)
+        self.current_thread.start()
 
     def check_queue(self):
         """Check for progress updates."""
@@ -223,6 +247,13 @@ class VerificacionCorreosGUI:
             text="📊 Ver Resultados",
             command=self._open_excel_file
         ).pack(side='left', padx=(5, 0))
+
+        self.api_btn = ttk.Button(
+            control_frame,
+            text="🔍 Buscar por API",
+            command=self._start_api_search
+        )
+        self.api_btn.pack(side='left', padx=(5, 0))
 
         # Progress section
         progress_frame = ttk.LabelFrame(main_frame, text="Progreso", padding=10)
@@ -884,6 +915,10 @@ class VerificacionCorreosGUI:
                 self._processing_complete(data)
             elif item_type == 'error':
                 self._processing_error(data)
+            elif item_type == 'api_complete':
+                self._handle_api_complete(data)
+            elif item_type == 'api_error':
+                self._handle_api_error(data)
             elif item_type == 'progress':
                 self._update_progress(data)
 
@@ -1032,6 +1067,110 @@ Resultados guardados en: {self.excel_path_var.get()}"""
 
         messagebox.showerror("Error de Procesamiento", f"Ocurrió un error:\n{error_msg}")
         self._add_log(f"❌ Error de procesamiento: {error_msg}")
+
+    def _start_api_search(self):
+        """Start API-based contact search."""
+        excel_path = self.excel_path_var.get()
+        if not excel_path:
+            messagebox.showwarning("Archivo Requerido", "Por favor seleccione un archivo de Excel")
+            return
+
+        session_file = self.config.get_session_file_path()
+        if not Path(session_file).exists():
+            if not messagebox.askyesno(
+                "Sesión Requerida",
+                "El archivo de sesión no existe.\n¿Desea configurar una nueva sesión primero?"
+            ):
+                return
+            self._setup_session()
+            return
+
+        # Confirm
+        if not messagebox.askyesno(
+            "Confirmar Búsqueda por API",
+            "¿Desea buscar contactos en el directorio de OWA vía API?\n\n"
+            "Esto consultará directamente el servicio FindPeople de Exchange\n"
+            "usando las cookies de la sesión guardada."
+        ):
+            return
+
+        try:
+            self.service.start_api_processing(excel_path)
+            self.start_btn.config(state='disabled')
+            self.api_btn.config(state='disabled')
+            self.stop_btn.config(state='normal')
+            self.progress_text.set("Buscando contactos por API...")
+            self._add_log("🔍 Iniciando búsqueda de contactos vía API de OWA")
+            self.status_label.config(text="Buscando...")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al iniciar búsqueda API: {e}")
+
+    def _handle_api_complete(self, result):
+        """Handle API search completion in GUI thread."""
+        self.start_btn.config(state='normal')
+        self.api_btn.config(state='normal')
+        self.stop_btn.config(state='disabled')
+
+        total = result.get("total", 0)
+        success = result.get("success", 0)
+        not_found = result.get("not_found", 0)
+        errors = result.get("errors", 0)
+        duration = result.get("duration", 0)
+        session_expired = result.get("expired", False)
+        found_pct = (success / total * 100) if total > 0 else 0
+
+        if session_expired:
+            remaining = result.get("remaining", 0)
+            self.progress_text.set(f"⚠️ Sesión expirada tras {total} consultas")
+            self.status_label.config(text="Sesión expirada")
+            message = f"""Búsqueda por API DETENIDA - Sesión expirada
+
+⚠️ La sesión de OWA ha expirado después de {total} consultas.
+   Los emails restantes quedarán pendientes para el próximo ciclo.
+
+📧 Procesados: {total}
+✅ Encontrados: {success} ({found_pct:.1f}%)
+❌ No encontrados: {not_found}
+⚠️ Errores (sesión): {errors}
+
+📌 Para continuar:
+   1. Cierra sesión y vuelve a iniciar en OWA
+   2. Ejecuta 'copiar_sesion.py' para refrescar la sesión
+   3. Vuelve a ejecutar la búsqueda
+
+Duración: {duration:.1f} segundos"""
+
+            messagebox.showwarning("Sesión Expirada", message)
+            self._add_log(f"⚠️ API search: sesión expirada tras {total} consultas ({success} encontrados, {not_found} no encontrados)")
+        else:
+            self.progress_text.set("Búsqueda API completada")
+            self.status_label.config(text="Completado")
+            message = f"""Búsqueda por API completada:
+
+📧 Total procesados: {total}
+✅ Encontrados: {success} ({found_pct:.1f}%)
+❌ No encontrados: {not_found}
+⚠️ Errores: {errors}
+
+Duración: {duration:.1f} segundos
+Resultados guardados en: {self.excel_path_var.get()}"""
+
+            messagebox.showinfo("Búsqueda por API Completada", message)
+            self._add_log(f"✅ API search: {success} encontrados, {not_found} no encontrados, {errors} errores")
+
+        self._refresh_excel_info()
+
+    def _handle_api_error(self, error_msg):
+        """Handle API search error in GUI thread."""
+        self.start_btn.config(state='normal')
+        self.api_btn.config(state='normal')
+        self.stop_btn.config(state='disabled')
+        self.progress_text.set("Error en búsqueda API")
+        self.status_label.config(text="Error")
+
+        messagebox.showerror("Error de Búsqueda API", f"Ocurrió un error:\n{error_msg}")
+        self._add_log(f"❌ Error en búsqueda API: {error_msg}")
 
     def _add_log(self, message):
         """Add message to log."""
