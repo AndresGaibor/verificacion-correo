@@ -9,176 +9,22 @@ import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox, filedialog
 import threading
 import queue
+import json
+import subprocess
+import platform
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, Callable
 import yaml
-import asyncio
-import sys
-import json
 
 from verificacion_correo.core.config import Config
-from verificacion_correo.core.browser import BrowserAutomation
-from verificacion_correo.core.session import SessionManager, get_session_status
-from verificacion_correo.core.excel import ExcelReader, ExcelWriter
-from verificacion_correo.core.api_extractor import process_emails_via_api
-from verificacion_correo.core.gal_scraper import scrape_gal
+from verificacion_correo.core.excel import ExcelReader
 from verificacion_correo.utils.logging import setup_logging, get_logger
+from verificacion_correo.gui.service import GUIService
+from verificacion_correo.gui.wizard import ConfigWizard
 
 
 logger = get_logger(__name__)
-
-
-class GUIService:
-    """Background service for GUI operations."""
-
-    def __init__(self, config: Config):
-        """Initialize GUI service."""
-        self.config = config
-        self.session_manager = SessionManager(config)
-        self.progress_queue = queue.Queue()
-        self.current_thread: Optional[threading.Thread] = None
-        self.is_processing = False
-        self.should_stop = False
-        self._gal_stop_flag: dict = {'stop': False}
-
-    def validate_session(self) -> Dict[str, Any]:
-        """Validate browser session."""
-        return get_session_status(self.config)
-
-    def setup_session(self, progress_callback: Callable = None) -> bool:
-        """Set up browser session interactively."""
-        try:
-            return self.session_manager.setup_interactive_session()
-        except Exception as e:
-            logger.error(f"Session setup error: {e}")
-            return False
-
-    def get_excel_summary(self, excel_path: str) -> Dict[str, Any]:
-        """Get Excel file summary."""
-        try:
-            reader = ExcelReader(excel_path)
-            summary = reader.read_pending_emails(batch_size=self.config.processing.batch_size)
-            return {
-                'total_emails': summary.total_emails,
-                'pending_count': summary.pending_count,
-                'processed_count': summary.processed_count,
-                'batch_count': len(summary.batches)
-            }
-        except Exception as e:
-            logger.error(f"Excel summary error: {e}")
-            return {'error': str(e)}
-
-    def start_processing(self, excel_path: str) -> None:
-        """Start email processing in background thread."""
-        if self.is_processing:
-            raise RuntimeError("Processing already active")
-
-        self.should_stop = False
-        self.is_processing = True
-
-        def processing_thread():
-            try:
-                logger.info("Using Playwright automation engine")
-                automation = BrowserAutomation(self.config)
-                stats = automation.process_emails(excel_path, progress_callback=self._handle_progress)
-                self.progress_queue.put(('complete', stats))
-            except Exception as e:
-                logger.error(f"Processing error: {e}")
-                self.progress_queue.put(('error', str(e)))
-            finally:
-                self.is_processing = False
-
-        self.current_thread = threading.Thread(target=processing_thread, daemon=True)
-        self.current_thread.start()
-
-    def _handle_progress(self, current: int, total: int):
-        """Handle progress updates from background threads."""
-        self.progress_queue.put(('progress', {'current': current, 'total': total}))
-
-    def stop_processing(self):
-        """Stop current processing."""
-        self.should_stop = True
-        self.is_processing = False
-
-    def start_api_processing(self, excel_path: str) -> None:
-        """Start API-based contact search in background thread."""
-        if self.is_processing:
-            raise RuntimeError("Processing already active")
-
-        self.should_stop = False
-        self.is_processing = True
-
-        def api_thread():
-            try:
-                session_file = self.config.get_session_file_path()
-                logger.info(f"Starting API search with session: {session_file}")
-                result = process_emails_via_api(excel_path, session_file, progress_callback=self._handle_progress)
-                self.progress_queue.put(('api_complete', result))
-            except Exception as e:
-                logger.error(f"API search error: {e}")
-                self.progress_queue.put(('api_error', str(e)))
-            finally:
-                self.is_processing = False
-
-        self.current_thread = threading.Thread(target=api_thread, daemon=True)
-        self.current_thread.start()
-
-    def start_gal_scraping(
-        self,
-        output_dir: str,
-        max_contacts: int = 0,
-        force_restart: bool = False,
-    ) -> None:
-        """Start GAL directory scraping in background thread."""
-        if self.is_processing:
-            raise RuntimeError("Processing already active")
-
-        self.should_stop = False
-        self.is_processing = True
-
-        def gal_thread():
-            try:
-                session_file = self.config.get_session_file_path()
-                logger.info(f"Starting GAL scraping with session: {session_file}")
-
-                stop_flag = {'stop': False}
-                self._gal_stop_flag = stop_flag
-
-                def progress_callback(count, total):
-                    self.progress_queue.put(('gal_progress', {'count': count, 'total': total}))
-
-                result = scrape_gal(
-                    session_file=session_file,
-                    output_dir=output_dir,
-                    max_contacts=max_contacts,
-                    force_restart=force_restart,
-                    progress_callback=progress_callback,
-                    stop_flag=stop_flag,
-                )
-                self.progress_queue.put(('gal_complete', result))
-            except Exception as e:
-                logger.error(f"GAL scraping error: {e}")
-                self.progress_queue.put(('gal_error', str(e)))
-            finally:
-                self.is_processing = False
-
-        self.current_thread = threading.Thread(target=gal_thread, daemon=True)
-        self.current_thread.start()
-
-    def stop_gal_scraping(self):
-        """Signal the GAL scraper to stop."""
-        if hasattr(self, '_gal_stop_flag'):
-            self._gal_stop_flag['stop'] = True
-
-    def check_queue(self):
-        """Check for progress updates."""
-        try:
-            while True:
-                item = self.progress_queue.get_nowait()
-                yield item
-        except queue.Empty:
-            pass
 
 
 class VerificacionCorreosGUI:
@@ -731,8 +577,6 @@ class VerificacionCorreosGUI:
         self.service.stop_gal_scraping()
         self.scraper_stop_btn.config(state='disabled')
 
-    # _run_scraper_thread and _run_scraper_async removed — replaced by service.start_gal_scraping()
-
     def _create_config_editor(self, parent):
         """Create configuration editor interface."""
         # Create notebook for different config sections
@@ -834,57 +678,13 @@ class VerificacionCorreosGUI:
             self.config.default_emails = [email.strip() for email in emails_text.split('\n') if email.strip()]
 
             # Save to file
-            self._save_config_to_file()
+            self.config.save()
 
             messagebox.showinfo("Configuración", "Configuración guardada exitosamente")
             self._refresh_excel_info()
 
         except Exception as e:
             messagebox.showerror("Error", f"Error al guardar configuración: {e}")
-
-    @staticmethod
-    def _build_config_yaml(config: Config) -> dict:
-        """Build YAML-serializable dict from Config object."""
-        return {
-            'page_url': config.page_url,
-            'default_emails': config.default_emails,
-            'browser': {
-                'headless': config.browser.headless,
-                'session_file': config.browser.session_file
-            },
-            'excel': {
-                'default_file': config.excel.default_file,
-                'start_row': config.excel.start_row,
-                'email_column': config.excel.email_column
-            },
-            'processing': {
-                'batch_size': config.processing.batch_size,
-                'discard_draft': config.processing.discard_draft
-            },
-            'selectors': {
-                'new_message_btn': config.selectors.new_message_btn,
-                'to_field_role': config.selectors.to_field_role,
-                'to_field_name': config.selectors.to_field_name,
-                'popup': config.selectors.popup,
-                'discard_btn': config.selectors.discard_btn
-            },
-            'wait_times': {
-                'after_new_message': config.wait_times.after_new_message,
-                'after_fill_to': config.wait_times.after_fill_to,
-                'after_blur': config.wait_times.after_blur,
-                'popup_visible': config.wait_times.popup_visible,
-                'after_click_token': config.wait_times.after_click_token,
-                'popup_load_data': config.wait_times.popup_load_data,
-                'after_close_popup': config.wait_times.after_close_popup,
-                'before_discard': config.wait_times.before_discard
-            }
-        }
-
-    def _save_config_to_file(self):
-        """Save configuration to YAML file."""
-        config_data = self._build_config_yaml(self.config)
-        with open(self.config._config_path, 'w', encoding='utf-8') as f:
-            yaml.dump(config_data, f, default_flow_style=False, allow_unicode=True)
 
     def _run_config_wizard(self):
         """Run configuration wizard for first-time setup."""
@@ -1292,10 +1092,6 @@ Resultados guardados en: {self.excel_path_var.get()}"""
     def _check_session_status(self):
         """Check and display session status."""
         try:
-            from pathlib import Path
-            import json
-
-            # Check Playwright session
             session_file = Path(self.config.get_session_file_path())
             session_type = "Playwright (Chromium)"
 
@@ -1307,7 +1103,6 @@ Resultados guardados en: {self.excel_path_var.get()}"""
                 try:
                     with open(session_file, 'r') as f:
                         session_data = json.load(f)
-
                     cookies_count = len(session_data.get('cookies', []))
                     status_text += f"Válida: Sí\n"
                     status_text += f"Cookies: {cookies_count}\n"
@@ -1427,8 +1222,6 @@ Resultados guardados en: {self.excel_path_var.get()}"""
             return
 
         try:
-            import subprocess
-            import platform
             if platform.system() == 'Windows':
                 subprocess.startfile(excel_path)
             elif platform.system() == 'Darwin':  # macOS
@@ -1442,8 +1235,6 @@ Resultados guardados en: {self.excel_path_var.get()}"""
         """Open data folder in system file explorer."""
         data_path = Path(self.config.get_excel_file_path()).parent
         try:
-            import subprocess
-            import platform
             if platform.system() == 'Windows':
                 subprocess.startfile(str(data_path))
             elif platform.system() == 'Darwin':  # macOS
@@ -1461,7 +1252,7 @@ Resultados guardados en: {self.excel_path_var.get()}"""
             excel_path = self.excel_path_var.get()
             if not excel_path or not Path(excel_path).exists():
                 return
-            from verificacion_correo.core.excel import ExcelReader, ProcessingStatus
+            from verificacion_correo.core.excel import ProcessingStatus
             reader = ExcelReader(excel_path)
             records = reader.read_all_records()
             for rec in records[-50:]:
@@ -1498,304 +1289,6 @@ Resultados guardados en: {self.excel_path_var.get()}"""
         self.progress_bar.config(mode='determinate')
         self.progress_bar['value'] = pct
         self.progress_text.set(f"Procesando: {current}/{total} ({pct:.0f}%)")
-
-
-class ConfigWizard:
-    """Configuration wizard for first-time setup."""
-
-    def __init__(self, parent, config: Config):
-        """Initialize configuration wizard."""
-        self.config = config
-        self.result = False
-        self.current_step = 0
-        self.total_steps = 4
-
-        # Create wizard window
-        self.wizard = tk.Toplevel(parent)
-        self.wizard.title("Asistente de Configuración Inicial")
-        self.wizard.geometry("600x500")
-        self.wizard.resizable(False, False)
-        self.wizard.transient(parent)
-        self.wizard.grab_set()
-
-        # Center the wizard
-        self.wizard.update_idletasks()
-        x = (self.wizard.winfo_screenwidth() // 2) - (600 // 2)
-        y = (self.wizard.winfo_screenheight() // 2) - (500 // 2)
-        self.wizard.geometry(f"600x500+{x}+{y}")
-
-        # Create wizard interface
-        self._create_wizard_interface()
-        self._show_step(0)
-
-    def _create_wizard_interface(self):
-        """Create wizard interface."""
-        # Title
-        title_frame = ttk.Frame(self.wizard)
-        title_frame.pack(fill='x', padx=20, pady=(20, 10))
-
-        self.title_label = ttk.Label(title_frame, text="", font=('TkDefaultFont', 12, 'bold'))
-        self.title_label.pack()
-
-        # Progress bar
-        progress_frame = ttk.Frame(self.wizard)
-        progress_frame.pack(fill='x', padx=20, pady=(0, 20))
-
-        self.progress_var = tk.IntVar(value=0)
-        self.progress_bar = ttk.Progressbar(progress_frame, variable=self.progress_var, maximum=self.total_steps)
-        self.progress_bar.pack(fill='x')
-
-        # Content area
-        self.content_frame = ttk.Frame(self.wizard)
-        self.content_frame.pack(fill='both', expand=True, padx=20, pady=10)
-
-        # Navigation buttons
-        nav_frame = ttk.Frame(self.wizard)
-        nav_frame.pack(fill='x', padx=20, pady=(0, 20))
-
-        self.back_btn = ttk.Button(nav_frame, text="← Anterior", command=self._back_step, state='disabled')
-        self.back_btn.pack(side='left')
-
-        self.next_btn = ttk.Button(nav_frame, text="Siguiente →", command=self._next_step)
-        self.next_btn.pack(side='right', padx=(0, 10))
-
-        self.cancel_btn = ttk.Button(nav_frame, text="Cancelar", command=self._cancel_wizard)
-        self.cancel_btn.pack(side='right')
-
-        self.finish_btn = ttk.Button(nav_frame, text="Finalizar", command=self._finish_wizard, style='Accent.TButton')
-        # finish_btn will be shown on last step
-
-    def _show_step(self, step: int):
-        """Show specific wizard step."""
-        # Clear content frame
-        for widget in self.content_frame.winfo_children():
-            widget.destroy()
-
-        self.current_step = step
-        self.progress_var.set(step + 1)
-
-        if step == 0:
-            self._show_welcome_step()
-        elif step == 1:
-            self._show_basic_config_step()
-        elif step == 2:
-            self._show_session_setup_step()
-        elif step == 3:
-            self._show_final_step()
-
-        # Update navigation buttons
-        self.back_btn.config(state='normal' if step > 0 else 'disabled')
-
-        if step == self.total_steps - 1:
-            self.next_btn.pack_forget()
-            self.finish_btn.pack(side='right', padx=(0, 10))
-        else:
-            self.finish_btn.pack_forget()
-            self.next_btn.pack(side='right', padx=(0, 10))
-
-    def _show_welcome_step(self):
-        """Show welcome step."""
-        self.title_label.config(text="Bienvenido al Asistente de Configuración")
-
-        welcome_text = """
-Este asistente te guiará en la configuración inicial de la aplicación
-de Verificación de Correos OWA.
-
-Configuraremos los siguientes aspectos:
-• Configuración básica de la aplicación
-• Archivo de Excel con correos a procesar
-• Sesión del navegador para acceso a OWA
-
-Al finalizar, tendrás la aplicación lista para usar.
-
-¿Deseas continuar con la configuración?
-        """
-
-        ttk.Label(self.content_frame, text=welcome_text, wraplength=550, justify='left').pack(pady=20)
-
-    def _show_basic_config_step(self):
-        """Show basic configuration step."""
-        self.title_label.config(text="Configuración Básica")
-
-        # URL configuration
-        url_frame = ttk.LabelFrame(self.content_frame, text="URL de OWA", padding=10)
-        url_frame.pack(fill='x', pady=(0, 10))
-
-        self.url_var = tk.StringVar(value=self.config.page_url)
-        ttk.Label(url_frame, text="URL del webmail:").pack(anchor='w')
-        ttk.Entry(url_frame, textvariable=self.url_var, width=70).pack(fill='x', pady=(5, 0))
-
-        # Excel file configuration
-        excel_frame = ttk.LabelFrame(self.content_frame, text="Archivo de Excel", padding=10)
-        excel_frame.pack(fill='x', pady=(0, 10))
-
-        self.excel_path_var = tk.StringVar(value=self.config.get_excel_file_path())
-        excel_entry_frame = ttk.Frame(excel_frame)
-        excel_entry_frame.pack(fill='x')
-        ttk.Entry(excel_entry_frame, textvariable=self.excel_path_var).pack(side='left', fill='x', expand=True, padx=(0, 5))
-        ttk.Button(excel_entry_frame, text="Examinar", command=self._browse_excel_file).pack(side='right')
-
-        ttk.Label(excel_frame, text="El archivo debe tener correos en la columna A, starting from row 2",
-                 font=('TkDefaultFont', 9)).pack(anchor='w', pady=(5, 0))
-
-        # Batch size
-        batch_frame = ttk.LabelFrame(self.content_frame, text="Procesamiento", padding=10)
-        batch_frame.pack(fill='x')
-
-        self.batch_size_var = tk.IntVar(value=self.config.processing.batch_size)
-        ttk.Label(batch_frame, text="Tamaño de lote (correos por lote):").pack(anchor='w')
-        ttk.Entry(batch_frame, textvariable=self.batch_size_var, width=10).pack(anchor='w', pady=(5, 0))
-
-    def _show_session_setup_step(self):
-        """Show session setup step."""
-        self.title_label.config(text="Configuración de Sesión")
-
-        session_info = """
-Para acceder al webmail de OWA, necesitas configurar una sesión de navegador.
-La aplicación guardará tu sesión para que no tengas que iniciar sesión
-cada vez que proceses correos.
-
-Pasos para configurar la sesión:
-1. Se abrirá una ventana del navegador
-2. Inicia sesión manualmente en OWA
-3. Cierra el navegador cuando hayas iniciado sesión
-4. La aplicación guardará la sesión automáticamente
-
-¿Listo para configurar la sesión?
-        """
-
-        ttk.Label(self.content_frame, text=session_info, wraplength=550, justify='left').pack(pady=20)
-
-        session_frame = ttk.LabelFrame(self.content_frame, text="Configuración de Sesión", padding=10)
-        session_frame.pack(fill='x', pady=(20, 0))
-
-        self.session_file_var = tk.StringVar(value=self.config.get_session_file_path())
-        ttk.Label(session_frame, text="Archivo de sesión:").pack(anchor='w')
-        session_entry_frame = ttk.Frame(session_frame)
-        session_entry_frame.pack(fill='x', pady=(5, 0))
-        ttk.Entry(session_entry_frame, textvariable=self.session_file_var).pack(side='left', fill='x', expand=True, padx=(0, 5))
-        ttk.Button(session_entry_frame, text="Examinar", command=self._browse_session_file).pack(side='right')
-
-        # Setup session button
-        ttk.Button(self.content_frame, text="🔧 Configurar Sesión Ahora",
-                  command=self._setup_session_wizard, style='Accent.TButton').pack(pady=(20, 0))
-
-    def _show_final_step(self):
-        """Show final step."""
-        self.title_label.config(text="Configuración Completa")
-
-        final_text = """
-¡Excelencial Has completado la configuración inicial.
-
-Resumen de tu configuración:
-• URL de OWA: {}
-• Archivo de Excel: {}
-• Archivo de sesión: {}
-• Tamaño de lote: {}
-
-La aplicación está lista para usar. Puedes:
-1. Ir a la pestaña "Procesamiento" para empezar a verificar correos
-2. Configurar la sesión del navegador si aún no lo has hecho
-3. Ajustar cualquier configuración en la pestaña "Configuración"
-
-¿Deseas finalizar el asistente?
-        """.format(
-            self.url_var.get() if hasattr(self, 'url_var') else self.config.page_url,
-            self.excel_path_var.get() if hasattr(self, 'excel_path_var') else self.config.get_excel_file_path(),
-            self.session_file_var.get() if hasattr(self, 'session_file_var') else self.config.get_session_file_path(),
-            self.batch_size_var.get() if hasattr(self, 'batch_size_var') else self.config.processing.batch_size
-        )
-
-        ttk.Label(self.content_frame, text=final_text, wraplength=550, justify='left').pack(pady=20)
-
-    def _browse_excel_file(self):
-        """Browse for Excel file."""
-        file_path = filedialog.askopenfilename(
-            title="Seleccionar archivo de Excel",
-            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")]
-        )
-        if file_path:
-            self.excel_path_var.set(file_path)
-
-    def _browse_session_file(self):
-        """Browse for session file."""
-        file_path = filedialog.askopenfilename(
-            title="Seleccionar archivo de sesión",
-            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
-        )
-        if file_path:
-            self.session_file_var.set(file_path)
-
-    def _setup_session_wizard(self):
-        """Setup browser session during wizard."""
-        try:
-            messagebox.showinfo(
-                "Configuración de Sesión",
-                "Se abrirá una ventana del navegador. Inicia sesión en OWA y luego cierra la ventana."
-            )
-
-            session_manager = SessionManager(self.config)
-            if session_manager.setup_interactive_session():
-                messagebox.showinfo("Éxito", "Sesión configurada correctamente")
-            else:
-                messagebox.showwarning("Advertencia", "No se pudo configurar la sesión automáticamente. Puedes hacerlo más tarde desde la aplicación.")
-        except Exception as e:
-            messagebox.showerror("Error", f"Error al configurar sesión: {e}")
-
-    def _back_step(self):
-        """Go to previous step."""
-        if self.current_step > 0:
-            self._show_step(self.current_step - 1)
-
-    def _next_step(self):
-        """Go to next step."""
-        if self.current_step < self.total_steps - 1:
-            # Validate current step
-            if self._validate_current_step():
-                self._show_step(self.current_step + 1)
-
-    def _validate_current_step(self) -> bool:
-        """Validate current wizard step."""
-        if self.current_step == 1:  # Basic config step
-            if not self.url_var.get().strip():
-                messagebox.showerror("Error", "La URL de OWA es requerida")
-                return False
-            if not self.excel_path_var.get().strip():
-                messagebox.showerror("Error", "La ruta del archivo Excel es requerida")
-                return False
-            if self.batch_size_var.get() <= 0:
-                messagebox.showerror("Error", "El tamaño de lote debe ser mayor que 0")
-                return False
-        return True
-
-    def _cancel_wizard(self):
-        """Cancel wizard."""
-        if messagebox.askyesno("Cancelar", "¿Estás seguro de que deseas cancelar el asistente de configuración?"):
-            self.wizard.destroy()
-
-    def _finish_wizard(self):
-        """Finish wizard and save configuration."""
-        try:
-            # Update configuration with wizard values
-            if hasattr(self, 'url_var'):
-                self.config.page_url = self.url_var.get()
-            if hasattr(self, 'excel_path_var'):
-                self.config.excel.default_file = self.excel_path_var.get()
-            if hasattr(self, 'session_file_var'):
-                self.config.browser.session_file = self.session_file_var.get()
-            if hasattr(self, 'batch_size_var'):
-                self.config.processing.batch_size = self.batch_size_var.get()
-
-            config_data = VerificacionCorreosGUI._build_config_yaml(self.config)
-            with open(self.config._config_path, 'w', encoding='utf-8') as f:
-                yaml.dump(config_data, f, default_flow_style=False, allow_unicode=True)
-
-            self.result = True
-            messagebox.showinfo("Éxito", "Configuración guardada correctamente")
-            self.wizard.destroy()
-
-        except Exception as e:
-            messagebox.showerror("Error", f"Error al guardar configuración: {e}")
 
 
 def main():

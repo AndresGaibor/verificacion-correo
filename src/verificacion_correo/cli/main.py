@@ -366,7 +366,7 @@ Examples:
                 excel_reader = ExcelReader(excel_path)
                 summary = excel_reader.read_pending_emails()
                 print(f"   Total emails: {summary.total_emails}")
-                print(f"   Pending: {summary.pending_emails}")
+                print(f"   Pending: {summary.pending_count}")
             except Exception as e:
                 print(f"   Error reading: {e}")
         else:

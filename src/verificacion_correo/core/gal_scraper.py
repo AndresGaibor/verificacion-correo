@@ -237,6 +237,8 @@ def scrape_gal(
     all_people = state["people"]
     session_expired = False
     total_fetched = len(all_people)
+    consecutive_failures = 0
+    max_consecutive_failures = 5
 
     while True:
         if stop_flag and stop_flag.get("stop"):
@@ -270,6 +272,7 @@ def scrape_gal(
                 logger.info("No more results — GAL fully fetched")
                 break
 
+            consecutive_failures = 0
             all_people.extend(people)
             total_fetched += len(people)
             offset += len(people)
@@ -292,15 +295,27 @@ def scrape_gal(
                 session_expired = True
                 progress.save(offset, all_people)
                 break
-            logger.error(f"HTTP {e.code} at offset {offset}: {e.reason}")
+            consecutive_failures += 1
+            logger.error(f"HTTP {e.code} at offset {offset}: {e.reason} (fail {consecutive_failures}/{max_consecutive_failures})")
+            if consecutive_failures >= max_consecutive_failures:
+                logger.error(f"Too many consecutive failures, aborting")
+                break
             time.sleep(request_delay * 2)
 
         except URLError as e:
-            logger.error(f"Connection error at offset {offset}: {e.reason}")
+            consecutive_failures += 1
+            logger.error(f"Connection error at offset {offset}: {e.reason} (fail {consecutive_failures}/{max_consecutive_failures})")
+            if consecutive_failures >= max_consecutive_failures:
+                logger.error(f"Too many consecutive failures, aborting")
+                break
             time.sleep(request_delay * 2)
 
         except Exception as e:
-            logger.error(f"Unexpected error at offset {offset}: {e}")
+            consecutive_failures += 1
+            logger.error(f"Unexpected error at offset {offset}: {e} (fail {consecutive_failures}/{max_consecutive_failures})")
+            if consecutive_failures >= max_consecutive_failures:
+                logger.error(f"Too many consecutive failures, aborting")
+                break
             time.sleep(request_delay * 2)
 
     # Export results

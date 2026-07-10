@@ -395,61 +395,34 @@ class BrowserAutomation:
             return None
 
     def _is_valid_contact(self, contact_info) -> bool:
-        """
-        Determine if extracted contact information is valid.
-
-        A contact is considered valid if we extracted ANY meaningful information,
-        which indicates the user exists in OWA (popup opened successfully).
-
-        The distinction is:
-        - VALID (EXISTS): Popup opened, extracted at least one field
-        - NOT FOUND: Popup didn't open, no data extracted, or extraction failed
-        """
-        # If we extracted nothing, user doesn't exist or popup failed
+        """Determine if extracted contact information is valid."""
         if not contact_info:
             return False
 
-        # Primary validation: SIP address indicates valid contact with full data
-        if contact_info.sip and contact_info.sip.strip():
+        has_sip = bool(contact_info.sip and contact_info.sip.strip())
+        has_personal_email = bool(
+            contact_info.email
+            and contact_info.email.strip()
+            and not re.match(r'^(ASP|AGM|AEM|ADM)\d+@', contact_info.email, re.I)
+        )
+        has_phone = bool(contact_info.phone and contact_info.phone.strip())
+        has_name_and_email = bool(
+            contact_info.name and contact_info.name.strip()
+            and contact_info.email and contact_info.email.strip()
+        )
+        has_address_or_dept = bool(
+            contact_info.address or contact_info.department
+        )
+
+        if has_sip or has_personal_email or has_phone or has_name_and_email or has_address_or_dept:
             return True
 
-        # Secondary validation: personal email (not generic token) indicates valid contact
-        if (contact_info.email and contact_info.email.strip() and
-                not re.match(r'^(ASP|AGM|AEM|ADM)\d+@', contact_info.email, re.I)):
-            return True
-
-        # Tertiary validation: phone number indicates valid contact
-        if contact_info.phone and contact_info.phone.strip():
-            return True
-
-        # Quaternary validation: If we have at least a name AND email (even if token email),
-        # the user EXISTS - OWA showed the popup with their information
-        if contact_info.name and contact_info.name.strip() and contact_info.email and contact_info.email.strip():
-            logger.debug(f"Contact validated by name + email presence: {contact_info.name}")
-            return True
-
-        # Quinary validation: Address or department info indicates valid contact
-        if contact_info.address and contact_info.address.strip():
-            return True
-
-        if contact_info.department and contact_info.department.strip():
-            return True
-
-        # If we have ANY field populated, the user exists (popup opened)
-        # This catches edge cases where OWA anti-scraping blocks most fields
-        has_any_data = any([
-            contact_info.name,
-            contact_info.email,
-            contact_info.phone,
-            contact_info.sip,
-            contact_info.address,
-            contact_info.department,
-            contact_info.company,
-            contact_info.office_location
+        # Catch-all: any field populated means popup opened
+        has_any = any([
+            contact_info.name, contact_info.email,
+            contact_info.company, contact_info.office_location
         ])
-
-        if has_any_data:
-            logger.debug(f"Contact validated by having at least one field populated")
+        if has_any:
             return True
 
         return False

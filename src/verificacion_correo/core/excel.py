@@ -24,7 +24,7 @@ logger = get_logger(__name__)
 
 class ProcessingStatus(Enum):
     """Processing status enumeration."""
-    PENDING = ""
+    PENDING = "PENDIENTE"
     SUCCESS = "OK"
     NOT_FOUND = "NO EXISTE"
     ERROR = "ERROR"
@@ -483,7 +483,7 @@ class ExcelWriter:
         end_col = self.columns.OFFICE_LOCATION.index
 
         for col in range(start_col, end_col + 1):
-            ws.cell(row=record.row, column=col, value=None)
+            ws.cell(row=record.row, column=col).value = None
 
     def write_batch_results(self, records: List[EmailRecord]):
         """

@@ -26,14 +26,16 @@ class FirstRunManager:
     def __init__(self):
         """Initialize first run manager."""
         self.config = None
-        self.first_run_file = Path(".first_run_completed")
+
+    def _get_marker_path(self) -> Path:
+        """Get path for first run marker file."""
+        if self.config:
+            data_dir = Path(self.config.get_excel_file_path()).parent
+            return data_dir / ".first_run_completed"
+        return Path(".first_run_completed")
 
     def is_first_run(self) -> bool:
         """Check if this is the first run."""
-        # Check if first run marker exists
-        if self.first_run_file.exists():
-            return False
-
         # Check for essential configuration files
         config_paths = [
             Path("config.yaml"),
@@ -43,6 +45,11 @@ class FirstRunManager:
         for config_path in config_paths:
             if config_path.exists():
                 return False
+
+        # Check first run marker
+        marker = self._get_marker_path()
+        if marker.exists():
+            return False
 
         return True
 
@@ -248,7 +255,9 @@ class FirstRunManager:
     def _create_first_run_marker(self):
         """Create marker file to indicate first run completed."""
         try:
-            with open(self.first_run_file, 'w') as f:
+            marker = self._get_marker_path()
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            with open(marker, 'w') as f:
                 f.write("First run completed\n")
                 f.write(f"Config: {self.config._config_path}\n")
                 f.write(f"Excel: {self.config.get_excel_file_path()}\n")

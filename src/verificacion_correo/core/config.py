@@ -259,6 +259,49 @@ class Config:
         # Regex patterns are fixed
         self.patterns = RegexPatterns()
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert config to YAML-serializable dict."""
+        return {
+            'page_url': self.page_url,
+            'default_emails': self.default_emails,
+            'browser': {
+                'headless': self.browser.headless,
+                'session_file': self.browser.session_file
+            },
+            'excel': {
+                'default_file': self.excel.default_file,
+                'start_row': self.excel.start_row,
+                'email_column': self.excel.email_column
+            },
+            'processing': {
+                'batch_size': self.processing.batch_size,
+                'discard_draft': self.processing.discard_draft
+            },
+            'selectors': {
+                'new_message_btn': self.selectors.new_message_btn,
+                'to_field_role': self.selectors.to_field_role,
+                'to_field_name': self.selectors.to_field_name,
+                'popup': self.selectors.popup,
+                'discard_btn': self.selectors.discard_btn
+            },
+            'wait_times': {
+                'after_new_message': self.wait_times.after_new_message,
+                'after_fill_to': self.wait_times.after_fill_to,
+                'after_blur': self.wait_times.after_blur,
+                'popup_visible': self.wait_times.popup_visible,
+                'after_click_token': self.wait_times.after_click_token,
+                'popup_load_data': self.wait_times.popup_load_data,
+                'after_close_popup': self.wait_times.after_close_popup,
+                'before_discard': self.wait_times.before_discard
+            }
+        }
+
+    def save(self) -> None:
+        """Save config to current YAML file."""
+        data = self.to_dict()
+        with open(self._config_path, 'w', encoding='utf-8') as f:
+            yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+
     def ensure_data_directory(self):
         """Ensure data directory exists."""
         data_dir = Path(self.excel.default_file).parent

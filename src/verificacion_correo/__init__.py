@@ -11,14 +11,12 @@ Main components:
 - utils: Utilidades comunes
 """
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"
 __author__ = "Andres Gaibor"
 __email__ = "andres@example.com"
 
-# Use absolute imports to avoid PyInstaller issues
-from verificacion_correo.core import config, browser, extractor, excel, session
-from verificacion_correo.cli import main as cli_main
-from verificacion_correo.gui import main as gui_main
+# Lazy imports para evitar cargar tkinter/playwright al importar el paquete
+# Los módulos se importan bajo demanda desde sus respectivos entry points
 
 __all__ = [
     "config",

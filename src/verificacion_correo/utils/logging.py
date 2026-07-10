@@ -7,6 +7,7 @@ and formatted output for both console and file logging.
 
 import logging
 import logging.config
+import logging.handlers
 import os
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -59,7 +60,9 @@ def setup_logging(
         log_path = Path(log_file)
         log_path.parent.mkdir(parents=True, exist_ok=True)
 
-        file_handler = logging.FileHandler(log_file, encoding='utf-8')
+        file_handler = logging.handlers.RotatingFileHandler(
+            log_file, maxBytes=10_485_760, backupCount=5, encoding='utf-8'
+        )
         file_handler.setLevel(logging.DEBUG)  # File gets all messages
         file_handler.setFormatter(formatter)
         root_logger.addHandler(file_handler)

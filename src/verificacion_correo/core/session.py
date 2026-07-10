@@ -115,7 +115,7 @@ class SessionManager:
                 # We'll wait up to 5 minutes (300 seconds)
                 try:
                     page.wait_for_timeout(300000)  # 5 minutes
-                except:
+                except Exception:
                     # Browser was closed by user, which is expected
                     pass
 
@@ -254,8 +254,8 @@ class SessionManager:
                 if 'old_loop' in locals() and old_loop is not None:
                     asyncio.set_event_loop(old_loop)
                     logger.debug("Event loop restored after error")
-            except:
-                pass
+            except Exception:
+                logger.exception("Failed to restore event loop after error")
 
             self._cleanup()
             return None
@@ -323,7 +323,7 @@ class SessionManager:
                         timeout=5000,
                         state='attached'
                     )
-                except:
+                except Exception:
                     # Element not found, session might be invalid
                     is_valid = False
 
