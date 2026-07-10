@@ -1,6 +1,6 @@
 # Interfaz Gráfica para Verificación de Correos OWA
 
-Esta guía explica cómo usar la nueva interfaz gráfica (GUI) para la verificación de correos OWA.
+Esta guía explica cómo usar la interfaz gráfica (GUI) para la verificación de correos OWA.
 
 ## 🚀 Inicio Rápido
 
@@ -11,7 +11,12 @@ Esta guía explica cómo usar la nueva interfaz gráfica (GUI) para la verificac
 
 ### Ejecutar la GUI
 ```bash
-python gui.py
+python -m verificacion_correo.gui.main
+```
+
+O usa el entry point instalado:
+```bash
+verificacion-correo-gui
 ```
 
 ## 📋 Componentes de la Interfaz
@@ -64,7 +69,7 @@ Muestra el progreso actual del procesamiento con:
 ## 🔄 Flujo de Trabajo
 
 ### 1. Configuración Inicial
-1. Abre la aplicación: `python gui.py`
+1. Abre la aplicación: `python -m verificacion_correo.gui.main`
 2. Ve a la pestaña "Configuración"
 3. Verifica que la URL de OWA sea correcta
 4. Ajusta el tamaño de lote si es necesario
@@ -122,11 +127,11 @@ Muestra el progreso actual del procesamiento con:
 
 ### Archivo Excel (correos.xlsx)
 ```
-| A                 | B        | C      | D             | ... |
-|-------------------|----------|--------|---------------|-----|
-| Correo            | Status   | Nombre | Email Personal | ... |
-| user1@empresa.com |          |        |               | ... |
-| user2@empresa.com |          |        |               | ... |
+| A                 | B      | C      | D             | ... |
+|-------------------|--------|--------|---------------|-----|
+| Correo            | Status | Nombre | Email Personal| ... |
+| user1@empresa.com |        |        |               | ... |
+| user2@empresa.com |        |        |               | ... |
 ```
 
 - **Columna A**: Correos electrónicos a verificar (obligatorio)
@@ -149,7 +154,7 @@ excel:
 
 ### Ejecutar GUI
 ```bash
-python gui.py
+python -m verificacion_correo.gui.main
 ```
 
 ### Crear Sesión (antes de usar GUI)
@@ -157,14 +162,9 @@ python gui.py
 python copiar_sesion.py
 ```
 
-### Probar Funcionamiento
+### Ver Ayuda CLI
 ```bash
-python test_gui.py
-```
-
-### Ver Ayuda
-```bash
-python gui.py --help  # (si está implementado)
+python -m verificacion_correo --help
 ```
 
 ## 📝 Notas Técnicas
@@ -177,10 +177,4 @@ python gui.py --help  # (si está implementado)
 
 ## 🔄 Compatibilidad
 
-La interfaz gráfica es **100% compatible** con los scripts existentes:
-- `app.py`: Script de línea de comandos
-- `browser_automation.py`: Automatización del navegador
-- `excel_reader.py` y `excel_writer.py`: Manejo de archivos Excel
-- `contact_extractor.py`: Extracción de información
-
-Puedes usar tanto la GUI como los scripts de línea de comandos indistintamente.
+La GUI usa la API REST (`api_extractor.py`) para procesar correos, sin depender de Playwright.

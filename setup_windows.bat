@@ -106,8 +106,7 @@ echo  4. Desde la GUI, ve a la pestana "Sesion" para hacer login manual
 echo.
 echo  Alternativamente desde CMD:
 echo     .venv\Scripts\activate
-echo     python scraper_gui.py    REM Para crear sesion
-echo     python app.py            REM Para validar correos (CLI)
-echo     python iniciar_gui.py    REM Para GUI clasica
+echo     python -m verificacion_correo.gui.main    REM GUI completa
+echo     verificacion-correo help                  REM CLI
 echo.
 pause

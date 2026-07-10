@@ -243,7 +243,7 @@ Si vienes de la versión anterior:
 2. **Nuevos comandos**:
    - `python app.py` → `verificacion-correo`
    - `python copiar_sesion.py` → `verificacion-correo setup`
-   - `python iniciar_gui.py` → `verificacion-correo-gui`
+   - `python -m verificacion_correo.gui.main` → `verificacion-correo-gui`
 
 3. **Configuración**:
    - `config.yaml` sigue siendo compatible
