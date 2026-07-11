@@ -7,14 +7,15 @@ tasks for the GUI application.
 
 import threading
 import queue
+from pathlib import Path
 from typing import Optional, Dict, Any, Callable
 
 from verificacion_correo.core.config import Config
 from verificacion_correo.core.browser import BrowserAutomation
 from verificacion_correo.core.session import SessionManager, get_session_status
 from verificacion_correo.core.excel import ExcelReader, ExcelWriter
-from verificacion_correo.core.api_extractor import process_emails_via_api
-from verificacion_correo.core.gal_scraper import scrape_gal
+from verificacion_correo.core.api_extractor import process_emails_via_api, validate_session_api, get_people_filters
+from verificacion_correo.core.gal_scraper import scrape_gal, fetch_company_list, save_companies_cache, load_companies_cache
 from verificacion_correo.utils.logging import get_logger
 
 
@@ -37,6 +38,11 @@ class GUIService:
     def validate_session(self) -> Dict[str, Any]:
         """Validate browser session."""
         return get_session_status(self.config)
+
+    def validate_session_api_quick(self) -> Dict[str, Any]:
+        """Quick session validation via API (no Playwright, no browser)."""
+        session_file = self.config.get_session_file_path()
+        return validate_session_api(session_file)
 
     def setup_session(self, progress_callback: Callable = None) -> bool:
         """Set up browser session interactively."""
@@ -105,7 +111,15 @@ class GUIService:
             try:
                 session_file = self.config.get_session_file_path()
                 logger.info(f"Starting API search with session: {session_file}")
-                result = process_emails_via_api(excel_path, session_file, progress_callback=self._handle_progress)
+
+                def session_health_callback(health_info):
+                    self.progress_queue.put(('session_health', health_info))
+
+                result = process_emails_via_api(
+                    excel_path, session_file,
+                    progress_callback=self._handle_progress,
+                    session_health_callback=session_health_callback,
+                )
                 self.progress_queue.put(('api_complete', result))
             except Exception as e:
                 logger.error(f"API search error: {e}")
@@ -121,6 +135,9 @@ class GUIService:
         output_dir: str,
         max_contacts: int = 0,
         force_restart: bool = False,
+        company_filter: Optional[list] = None,
+        enrich_contacts: bool = False,
+        address_list_id: Optional[str] = None,
     ) -> None:
         """Start GAL directory scraping in background thread."""
         if self.is_processing:
@@ -140,13 +157,20 @@ class GUIService:
                 def progress_callback(count, total):
                     self.progress_queue.put(('gal_progress', {'count': count, 'total': total}))
 
+                def session_health_callback(health_info):
+                    self.progress_queue.put(('session_health', health_info))
+
                 result = scrape_gal(
                     session_file=session_file,
                     output_dir=output_dir,
                     max_contacts=max_contacts,
                     force_restart=force_restart,
                     progress_callback=progress_callback,
+                    session_health_callback=session_health_callback,
                     stop_flag=stop_flag,
+                    company_filter=company_filter,
+                    enrich_contacts=enrich_contacts,
+                    address_list_id=address_list_id or "fed75805-8ba2-4323-9f6d-80be7e3abc6a",
                 )
                 self.progress_queue.put(('gal_complete', result))
             except Exception as e:
@@ -162,6 +186,76 @@ class GUIService:
         """Signal the GAL scraper to stop."""
         if hasattr(self, '_gal_stop_flag'):
             self._gal_stop_flag['stop'] = True
+
+    def start_company_scan(self, address_list_id: Optional[str] = None) -> None:
+        """Start company list scan from GAL in background thread."""
+        if self.is_processing:
+            raise RuntimeError("Processing already active")
+
+        self.should_stop = False
+        self.is_processing = True
+
+        def scan_thread():
+            try:
+                session_file = self.config.get_session_file_path()
+                logger.info(f"Starting company scan with session: {session_file}")
+
+                kwargs = {}
+                if address_list_id:
+                    kwargs['address_list_id'] = address_list_id
+
+                companies = fetch_company_list(session_file, **kwargs)
+
+                # Save cache in the same output dir as GAL scraper
+                output_dir = Path(self.config.get_excel_file_path()).parent / "gal"
+                output_dir.mkdir(parents=True, exist_ok=True)
+                save_companies_cache(companies, output_dir)
+
+                self.progress_queue.put(('company_scan_complete', {
+                    'companies': companies,
+                    'count': len(companies),
+                }))
+            except Exception as e:
+                logger.error(f"Company scan error: {e}")
+                self.progress_queue.put(('company_scan_error', str(e)))
+            finally:
+                self.is_processing = False
+
+        self.current_thread = threading.Thread(target=scan_thread, daemon=True)
+        self.current_thread.start()
+
+    def get_cached_companies(self) -> list:
+        """Get cached company list from previous scan."""
+        output_dir = Path(self.config.get_excel_file_path()).parent / "gal"
+        return load_companies_cache(output_dir) or []
+
+    def start_address_list_scan(self) -> None:
+        """Start address list scan from OWA in background thread."""
+        if self.is_processing:
+            raise RuntimeError("Processing already active")
+
+        self.should_stop = False
+        self.is_processing = True
+
+        def scan_thread():
+            try:
+                session_file = self.config.get_session_file_path()
+                logger.info(f"Starting address list scan with session: {session_file}")
+
+                address_lists = get_people_filters(session_file)
+
+                self.progress_queue.put(('address_list_scan_complete', {
+                    'address_lists': address_lists,
+                    'count': len(address_lists),
+                }))
+            except Exception as e:
+                logger.error(f"Address list scan error: {e}")
+                self.progress_queue.put(('address_list_scan_error', str(e)))
+            finally:
+                self.is_processing = False
+
+        self.current_thread = threading.Thread(target=scan_thread, daemon=True)
+        self.current_thread.start()
 
     def check_queue(self):
         """Check for progress updates."""

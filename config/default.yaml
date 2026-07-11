@@ -1,29 +1,35 @@
-page_url: https://correoweb.madrid.org/owa/#path=/mail
+browser:
+  headless: false
+  session_file: /Users/andresgaibor/code/python/verificacion-correo/state.json
+company_filter:
+  companies:
+  - ORGANOS JUDICIALES
+  - JUZGADO DE PAZ
+  - OFICINA JUDICIAL MUNICPAL
+  enabled: false
 default_emails:
 - ASP164@MADRID.ORG
 - AGM564@MADRID.ORG
-browser:
-  headless: false
-  session_file: state.json
 excel:
-  default_file: data/correos.xlsx
-  start_row: 2
+  default_file: /Users/andresgaibor/code/python/verificacion-correo/data/correos.xlsx
   email_column: 1
+  start_row: 2
+page_url: https://correoweb.madrid.org/owa/#path=/mail
 processing:
   batch_size: 10
   discard_draft: false
 selectors:
-  new_message_btn: button[title="Escribir un mensaje nuevo (N)"]
-  to_field_role: textbox
-  to_field_name: Para
-  popup: div._pe_Y[ispopup="1"]
   discard_btn: button[aria-label="Descartar"]
+  new_message_btn: button[title="Escribir un mensaje nuevo (N)"]
+  popup: div._pe_Y[ispopup="1"]
+  to_field_name: Para
+  to_field_role: textbox
 wait_times:
-  after_new_message: 1000
-  after_fill_to: 3000
   after_blur: 500
-  popup_visible: 5000
   after_click_token: 2000
-  popup_load_data: 5000
   after_close_popup: 1000
+  after_fill_to: 3000
+  after_new_message: 1000
   before_discard: 2000
+  popup_load_data: 5000
+  popup_visible: 5000

@@ -15,6 +15,7 @@ from verificacion_correo.core.extractor import ContactExtractor
 from verificacion_correo.core.excel import ExcelReader, ExcelWriter
 from verificacion_correo.core.session import SessionManager
 from verificacion_correo.core.gal_scraper import scrape_gal
+from verificacion_correo.core.platform import open_file, open_folder, open_in_explorer
 
 __all__ = [
     "Config",
@@ -24,4 +25,7 @@ __all__ = [
     "ExcelWriter",
     "SessionManager",
     "scrape_gal",
+    "open_file",
+    "open_folder",
+    "open_in_explorer",
 ]

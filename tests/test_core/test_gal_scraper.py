@@ -31,7 +31,7 @@ class TestProgressFile:
     def test_load_returns_default_when_no_file(self, tmp_path):
         pf = ProgressFile(tmp_path)
         result = pf.load()
-        assert result == {"offset": 0, "people": []}
+        assert result == {"offset": 0, "people": [], "completed_companies": []}
 
     def test_exists_false_when_no_file(self, tmp_path):
         pf = ProgressFile(tmp_path)
@@ -474,3 +474,161 @@ class TestScrapeGalValidation:
         with pytest.raises(ValueError, match="request_delay"):
             scrape_gal(session, output_dir=str(tmp_path / "out"),
                        request_delay=-1.0)
+
+
+# ─── QueryString Server-Side Filtering Tests ────────────────────────
+
+class TestPayloadQueryString:
+    def test_no_query_string_when_none(self):
+        payload = _build_find_people_payload(0, 100, "addr-id")
+        assert "QueryString" not in payload["Body"]
+
+    def test_query_string_added_when_provided(self):
+        payload = _build_find_people_payload(0, 100, "addr-id", query_string="ORGANOS JUDICIALES")
+        assert payload["Body"]["QueryString"] == "ORGANOS JUDICIALES"
+
+    def test_query_string_empty_string_not_added(self):
+        payload = _build_find_people_payload(0, 100, "addr-id", query_string="")
+        assert "QueryString" not in payload["Body"]
+
+    def test_query_string_none_not_added(self):
+        payload = _build_find_people_payload(0, 100, "addr-id", query_string=None)
+        assert "QueryString" not in payload["Body"]
+
+
+class TestProgressFileCompanyFields:
+    def test_save_and_load_with_company_fields(self, tmp_path):
+        pf = ProgressFile(tmp_path)
+        pf.save(
+            500, [{"name": "A"}],
+            completed_companies=["Company A", "Company B"],
+            current_company="Company C",
+            company_offset=123,
+        )
+        loaded = pf.load()
+        assert loaded["completed_companies"] == ["Company A", "Company B"]
+        assert loaded["current_company"] == "Company C"
+        assert loaded["company_offset"] == 123
+
+    def test_load_backward_compatible_without_company_fields(self, tmp_path):
+        """Old progress files without company fields still load."""
+        progress_file = tmp_path / PROGRESS_FILENAME
+        progress_file.write_text(
+            json.dumps({"offset": 100, "count": 5, "people": [{"name": "X"}]}),
+            encoding="utf-8",
+        )
+        pf = ProgressFile(tmp_path)
+        loaded = pf.load()
+        assert loaded["offset"] == 100
+        assert loaded["completed_companies"] == []
+
+
+class TestScrapeGalCompanyFilter:
+    def test_filter_uses_client_side_company_filtering(self, tmp_path):
+        """With company_filter, all contacts are fetched then filtered by CompanyName
+        client-side. QueryString is NOT used (Exchange GAL doesn't support it)."""
+        session = _mock_session_file(tmp_path)
+        output = str(tmp_path / "output")
+
+        contact_oj = {"DisplayName": "Juez A", "CompanyName": "ORGANOS JUDICIALES",
+                       "EmailAddress": {"EmailAddress": "a@madrid.org"}}
+        contact_dg = {"DisplayName": "Dir B", "CompanyName": "DIRECCION GENERAL",
+                       "EmailAddress": {"EmailAddress": "b@madrid.org"}}
+        contact_other = {"DisplayName": "Other C", "CompanyName": "OTHER",
+                          "EmailAddress": {"EmailAddress": "c@madrid.org"}}
+
+        with patch("verificacion_correo.core.gal_scraper._build_cookie_header", return_value="c=v"), \
+             patch("verificacion_correo.core.gal_scraper._get_canary", return_value="can"), \
+             patch("verificacion_correo.core.gal_scraper.urlopen") as mock_urlopen, \
+             patch("verificacion_correo.core.gal_scraper.time.sleep"):
+
+            # effective_batch = max(batch_size, 1000), so batch_size=10 → 1000
+            # First call returns 3 people, second returns empty → loop terminates
+            mock_urlopen.side_effect = [
+                _mock_response({"Body": {"People": [contact_oj, contact_dg, contact_other]}}),
+                _mock_response({"Body": {"People": []}}),
+            ]
+
+            stats = scrape_gal(
+                session, output_dir=output,
+                company_filter=["ORGANOS JUDICIALES", "DIRECCION GENERAL"],
+                batch_size=10, request_delay=0,
+            )
+
+        # Only the 2 matching companies are included
+        assert stats["total"] == 2
+
+        # Verify QueryString was NOT used in any request
+        import json as _json
+        for call in mock_urlopen.call_args_list:
+            req = call[0][0]
+            payload = _json.loads(req.data)
+            assert "QueryString" not in payload["Body"]
+
+    def test_filter_resumes_from_offset(self, tmp_path):
+        """Resuming with company_filter picks up from saved offset (not per-company)."""
+        session = _mock_session_file(tmp_path)
+        output = str(tmp_path / "output")
+
+        # Pre-save progress: offset 20 (already scanned 20 contacts)
+        progress_dir = tmp_path / "output"
+        progress_dir.mkdir()
+        pf = ProgressFile(progress_dir)
+        pf.save(20, [{"DisplayName": "AlreadyHave", "CompanyName": "X",
+                      "EmailAddress": {"EmailAddress": "x@x.org"}}])
+
+        # New contacts from offset 20 onwards
+        contact_oj = {"DisplayName": "Juez", "CompanyName": "ORGANOS JUDICIALES",
+                       "EmailAddress": {"EmailAddress": "juez@madrid.org"}}
+
+        with patch("verificacion_correo.core.gal_scraper._build_cookie_header", return_value="c=v"), \
+             patch("verificacion_correo.core.gal_scraper._get_canary", return_value="can"), \
+             patch("verificacion_correo.core.gal_scraper.urlopen") as mock_urlopen, \
+             patch("verificacion_correo.core.gal_scraper.time.sleep"):
+
+            # effective_batch=1000; first call returns 1 person (matches), second empty
+            mock_urlopen.side_effect = [
+                _mock_response({"Body": {"People": [contact_oj]}}),
+                _mock_response({"Body": {"People": []}}),
+            ]
+
+            stats = scrape_gal(
+                session, output_dir=output,
+                company_filter=["ORGANOS JUDICIALES"],
+                batch_size=10, request_delay=0,
+            )
+
+        # 1 new contact from offset 20+
+        assert stats["total"] == 1
+        # Resume offset was 20, so first call should use offset >= 20
+        import json as _json
+        first_req = mock_urlopen.call_args_list[0][0][0]
+        first_payload = _json.loads(first_req.data)
+        assert first_payload["Body"]["IndexedPageItemView"]["Offset"] == 20
+
+    def test_filter_company_not_found(self, tmp_path):
+        """When no contacts match the company filter, total is 0."""
+        session = _mock_session_file(tmp_path)
+        output = str(tmp_path / "output")
+
+        contact_other = {"DisplayName": "Someone", "CompanyName": "UNRELATED",
+                          "EmailAddress": {"EmailAddress": "s@madrid.org"}}
+
+        with patch("verificacion_correo.core.gal_scraper._build_cookie_header", return_value="c=v"), \
+             patch("verificacion_correo.core.gal_scraper._get_canary", return_value="can"), \
+             patch("verificacion_correo.core.gal_scraper.urlopen") as mock_urlopen, \
+             patch("verificacion_correo.core.gal_scraper.time.sleep"):
+
+            # First batch returns 1 unrelated person, second returns empty
+            mock_urlopen.side_effect = [
+                _mock_response({"Body": {"People": [contact_other]}}),
+                _mock_response({"Body": {"People": []}}),
+            ]
+
+            stats = scrape_gal(
+                session, output_dir=output,
+                company_filter=["NONEXISTENT COMPANY"],
+                batch_size=10, request_delay=0,
+            )
+
+        assert stats["total"] == 0

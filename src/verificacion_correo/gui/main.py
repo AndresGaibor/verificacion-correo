@@ -10,13 +10,12 @@ from tkinter import ttk, scrolledtext, messagebox, filedialog
 import threading
 import queue
 import json
-import os
-import subprocess
-import platform
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, Callable
 import yaml
+
+from verificacion_correo.core.platform import open_file, open_folder
 
 from verificacion_correo.core.config import Config
 from verificacion_correo.core.excel import ExcelReader
@@ -80,11 +79,19 @@ class VerificacionCorreosGUI:
         self.log_messages = []
         
         self.scraper_output_dir = tk.StringVar(value=str(Path.cwd() / "data"))
-        self.scraper_max_contacts = tk.IntVar(value=100)
+        self.scraper_max_contacts = tk.IntVar(value=500)
         self.scraper_extracted_count = tk.IntVar(value=0)
         self.is_processing = False
         self.scraper_active = False
         self.scraper_log_messages = []
+
+        # Address list selection
+        self.address_lists = []  # List of {"DisplayName": ..., "FolderId": {"Id": ...}}
+        self.selected_address_list_id = tk.StringVar(value="fed75805-8ba2-4323-9f6d-80be7e3abc6a")
+
+        # Company filter variables
+        self.all_companies = []
+        self.company_search_var = tk.StringVar(value="")
 
         # Create interface
         self._create_widgets()
@@ -408,9 +415,147 @@ class VerificacionCorreosGUI:
             validatecommand=vcmd_scraper
         ).pack(anchor='w')
 
+        # Address list selection
+        addr_frame = ttk.LabelFrame(config_frame, text="Lista de Direcciones (Address List)", padding=5)
+        addr_frame.pack(fill='x', pady=(5, 0))
+
+        addr_controls = ttk.Frame(addr_frame)
+        addr_controls.pack(fill='x')
+
+        self.address_list_combo = ttk.Combobox(
+            addr_controls,
+            textvariable=self.selected_address_list_id,
+            state='readonly',
+            width=60,
+        )
+        self.address_list_combo.pack(side='left', fill='x', expand=True, padx=(0, 5))
+
+        self.addr_list_scan_btn = ttk.Button(
+            addr_controls,
+            text="🔄 Cargar listas",
+            command=self._scan_address_lists,
+        )
+        self.addr_list_scan_btn.pack(side='left')
+
+        self.addr_list_status_label = ttk.Label(
+            addr_frame,
+            text="Use 'Cargar listas' para descubrir las listas de direcciones disponibles en OWA",
+            foreground='gray',
+            font=('TkDefaultFont', 9, 'italic'),
+        )
+        self.addr_list_status_label.pack(anchor='w', pady=(3, 0))
+
+        # Company filter section
+        filter_frame = ttk.LabelFrame(main_frame, text="Filtro de Compañías", padding=10)
+        filter_frame.pack(fill='x', pady=(0, 10))
+
+        # Enable/disable filter
+        self.company_filter_enabled = tk.BooleanVar(
+            value=self.config.company_filter.enabled if hasattr(self.config, 'company_filter') else False
+        )
+        ttk.Checkbutton(
+            filter_frame,
+            text="Filtrar por compañía (solo guardar contactos de las compañías seleccionadas)",
+            variable=self.company_filter_enabled,
+            command=self._on_company_filter_toggle
+        ).pack(anchor='w', pady=(0, 5))
+
+        # Company filter controls
+        filter_controls = ttk.Frame(filter_frame)
+        filter_controls.pack(fill='x', pady=(0, 5))
+
+        self.company_scan_btn = ttk.Button(
+            filter_controls,
+            text="🔄 Cargar compañías desde API",
+            command=self._scan_companies
+        )
+        self.company_scan_btn.pack(side='left', padx=(0, 5))
+
+        # Company search box
+        search_entry = ttk.Entry(
+            filter_controls,
+            textvariable=self.company_search_var,
+            width=25,
+        )
+        search_entry.pack(side='left', padx=(0, 3))
+        search_entry.insert(0, "🔍 Buscar compañía...")
+        search_entry.config(foreground='gray')
+        search_entry.bind('<FocusIn>', lambda e: self._on_search_focus_in(search_entry))
+        search_entry.bind('<FocusOut>', lambda e: self._on_search_focus_out(search_entry))
+        search_entry.bind('<KeyRelease>', lambda e: self._filter_company_list())
+        self.company_search_entry = search_entry
+
+        # Manual company entry
+        ttk.Label(filter_controls, text="+").pack(side='left', padx=(5, 2))
+        self.company_manual_entry = ttk.Entry(filter_controls, width=22)
+        self.company_manual_entry.pack(side='left', padx=(0, 3))
+        self.company_manual_entry.insert(0, "Escribir compañía...")
+        self.company_manual_entry.config(foreground='gray')
+        self.company_manual_entry.bind('<FocusIn>', lambda e: self._on_manual_company_focus_in())
+        self.company_manual_entry.bind('<FocusOut>', lambda e: self._on_manual_company_focus_out())
+        self.company_manual_entry.bind('<Return>', lambda e: self._add_manual_company())
+
+        ttk.Button(
+            filter_controls,
+            text="+",
+            width=3,
+            command=self._add_manual_company
+        ).pack(side='left', padx=(0, 5))
+
+        ttk.Button(
+            filter_controls,
+            text="Seleccionar todas",
+            command=self._select_all_companies
+        ).pack(side='left', padx=(0, 5))
+
+        ttk.Button(
+            filter_controls,
+            text="Deseleccionar todas",
+            command=self._deselect_all_companies
+        ).pack(side='left')
+
+        # Company list with scrollbar
+        list_frame = ttk.Frame(filter_frame)
+        list_frame.pack(fill='x')
+
+        self.company_list_canvas = tk.Canvas(list_frame, height=120, highlightthickness=0)
+        company_scrollbar = ttk.Scrollbar(list_frame, orient='vertical', command=self.company_list_canvas.yview)
+        self.company_list_inner = ttk.Frame(self.company_list_canvas)
+
+        self.company_list_inner.bind(
+            '<Configure>',
+            lambda e: self.company_list_canvas.configure(scrollregion=self.company_list_canvas.bbox("all"))
+        )
+        self.company_list_canvas.create_window((0, 0), window=self.company_list_inner, anchor='nw')
+        self.company_list_canvas.configure(yscrollcommand=company_scrollbar.set)
+
+        self.company_list_canvas.pack(side='left', fill='both', expand=True)
+        company_scrollbar.pack(side='right', fill='y')
+
+        # Store company checkboxes
+        self.company_checkboxes = {}
+        self.company_vars = {}
+
+        # Company status label
+        self.company_status_label = ttk.Label(
+            filter_frame,
+            text="No hay compañías cargadas",
+            foreground='gray',
+            font=('TkDefaultFont', 9, 'italic')
+        )
+        self.company_status_label.pack(anchor='w', pady=(5, 0))
+
         # Control section
         control_frame = ttk.LabelFrame(main_frame, text="Control de Extracción", padding=10)
         control_frame.pack(fill='x', pady=(0, 10))
+
+        # Enrichment option
+        self.enrich_contacts_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            control_frame,
+            text=" Enriquecer contactos (obtener teléfono, departamento, dirección, oficina — más lento)",
+            variable=self.enrich_contacts_var
+        ).pack(anchor='w', pady=(0, 5))
 
         button_frame = ttk.Frame(control_frame)
         button_frame.pack(fill='x')
@@ -517,6 +662,9 @@ class VerificacionCorreosGUI:
         self._add_scraper_log(f"📁 Directorio de salida: {self.scraper_output_dir.get()}")
         self._update_scraper_total_label()
 
+        # Load cached companies if available
+        self._load_cached_companies()
+
     def _select_scraper_directory(self):
         """Select output directory for scraper."""
         directory = filedialog.askdirectory(
@@ -575,6 +723,328 @@ class VerificacionCorreosGUI:
         """Update scraper status label."""
         self.scraper_status_label.config(text=message, foreground=color)
 
+    # --- Address list methods ---
+
+    def _scan_address_lists(self):
+        """Start address list scan from OWA API."""
+        session_file = self.config.get_session_file_path()
+        if not Path(session_file).exists():
+            messagebox.showwarning(
+                "Sesión Requerida",
+                "No hay sesión guardada. Configura una sesión primero."
+            )
+            return
+
+        self.addr_list_scan_btn.config(state='disabled')
+        self.addr_list_status_label.config(text="🔄 Escaneando listas de direcciones...", foreground='#3498db')
+        self._add_scraper_log("🔄 Iniciando escaneo de listas de direcciones vía GetPeopleFilters...")
+
+        try:
+            self.service.start_address_list_scan()
+        except Exception as e:
+            self._add_scraper_log(f"❌ Error al iniciar escaneo de listas: {e}")
+            self.addr_list_scan_btn.config(state='normal')
+            self.addr_list_status_label.config(text="Error al escanear", foreground='#e74c3c')
+
+    def _handle_address_list_scan_complete(self, result):
+        """Handle address list scan completion."""
+        self.root.after(0, lambda: self._on_address_list_scan_complete(result))
+
+    def _on_address_list_scan_complete(self, result):
+        """Process address list scan results in GUI thread."""
+        address_lists = result.get('address_lists', [])
+        count = result.get('count', 0)
+
+        self.addr_list_scan_btn.config(state='normal')
+        self.address_lists = address_lists
+
+        if address_lists:
+            # Build display names for combobox
+            display_names = [f"{al['DisplayName']}" for al in address_lists]
+            self.address_list_combo['values'] = display_names
+
+            # Try to select the default GAL
+            default_idx = 0
+            for i, al in enumerate(address_lists):
+                if 'default' in al['DisplayName'].lower() and 'global' in al['DisplayName'].lower():
+                    default_idx = i
+                    break
+
+            self.address_list_combo.current(default_idx)
+            self._update_selected_address_list_id()
+
+            self.addr_list_status_label.config(
+                text=f"✅ {count} listas encontradas — seleccionada: {address_lists[default_idx]['DisplayName']}",
+                foreground='#27ae60',
+            )
+            self._add_scraper_log(f"✅ Escaneo completado: {count} listas de direcciones encontradas")
+            for al in address_lists:
+                self._add_scraper_log(f"   📋 {al['DisplayName']} → {al['FolderId']['Id']}")
+        else:
+            self.addr_list_status_label.config(text="⚠️ No se encontraron listas", foreground='#e67e22')
+            self._add_scraper_log("⚠️ No se encontraron listas de direcciones")
+
+    def _handle_address_list_scan_error(self, error_msg):
+        """Handle address list scan error."""
+        self.root.after(0, lambda: self._on_address_list_scan_error(error_msg))
+
+    def _on_address_list_scan_error(self, error_msg):
+        """Process address list scan error in GUI thread."""
+        self.addr_list_scan_btn.config(state='normal')
+        self.addr_list_status_label.config(text="Error al escanear", foreground='#e74c3c')
+        self._add_scraper_log(f"❌ Error en escaneo de listas: {error_msg}")
+        messagebox.showerror("Error de Escaneo", f"Error al escanear listas de direcciones:\n{error_msg}")
+
+    def _update_selected_address_list_id(self):
+        """Update the selected AddressListId based on combobox selection."""
+        selection = self.address_list_combo.current()
+        if selection >= 0 and selection < len(self.address_lists):
+            list_id = self.address_lists[selection]['FolderId']['Id']
+            self.selected_address_list_id.set(list_id)
+
+    def _on_search_focus_in(self, entry):
+        """Handle search entry focus in."""
+        if entry.get() == "🔍 Buscar compañía...":
+            entry.delete(0, tk.END)
+            entry.config(foreground='black')
+
+    def _on_search_focus_out(self, entry):
+        """Handle search entry focus out."""
+        if entry.get().strip() == "":
+            entry.insert(0, "🔍 Buscar compañía...")
+            entry.config(foreground='gray')
+            self._filter_company_list()
+
+    def _on_manual_company_focus_in(self):
+        entry = self.company_manual_entry
+        if entry.get() == "Escribir compañía...":
+            entry.delete(0, tk.END)
+            entry.config(foreground='black')
+
+    def _on_manual_company_focus_out(self):
+        entry = self.company_manual_entry
+        if entry.get().strip() == "":
+            entry.insert(0, "Escribir compañía...")
+            entry.config(foreground='gray')
+
+    def _filter_company_list(self):
+        """Filter company list based on search text."""
+        search_text = self.company_search_var.get().strip().lower()
+        if search_text == "" or search_text == "🔍 buscar compañía...":
+            search_text = ""
+
+        for company, var in self.company_vars.items():
+            if not search_text or search_text in company.lower():
+                self.company_checkboxes[company].pack_forget()
+                self.company_checkboxes[company].pack(anchor='w', padx=5)
+            else:
+                self.company_checkboxes[company].pack_forget()
+
+        self.company_list_canvas.update_idletasks()
+        self.company_list_canvas.configure(
+            scrollregion=self.company_list_canvas.bbox("all")
+        )
+
+    def _add_manual_company(self):
+        """Add a manually entered company to the filter."""
+        entry = self.company_manual_entry
+        text = entry.get().strip()
+
+        if not text or text == "Escribir compañía...":
+            return
+
+        # Split by comma or newline
+        new_companies = [c.strip() for c in text.replace('\n', ',').split(',') if c.strip()]
+
+        for company_name in new_companies:
+            if company_name not in self.company_vars:
+                # Create checkbox for this new company
+                var = tk.BooleanVar(value=True)
+                self.company_vars[company_name] = var
+                cb = ttk.Checkbutton(
+                    self.company_list_inner,
+                    text=f"✏️ {company_name} (manual)",
+                    variable=var,
+                    command=self._save_company_selection
+                )
+                cb.pack(anchor='w', padx=5)
+                self.company_checkboxes[company_name] = cb
+                self.all_companies.append(company_name)
+                self._add_scraper_log(f"   ➕ Compañía manual agregada: {company_name}")
+            else:
+                # Already exists, just check it
+                self.company_vars[company_name].set(True)
+
+        # Clear entry
+        entry.delete(0, tk.END)
+        entry.insert(0, "Escribir compañía...")
+        entry.config(foreground='gray')
+
+        self._save_company_selection()
+        self._update_company_status()
+
+    # --- Company filter methods ---
+
+    def _load_cached_companies(self):
+        """Load cached company list from previous scan."""
+        try:
+            companies = self.service.get_cached_companies()
+            if companies:
+                self._populate_company_list(companies)
+                self._add_scraper_log(f"📋 {len(companies)} compañías cargadas desde caché")
+        except Exception as e:
+            logger.debug(f"No se pudo cargar caché de compañías: {e}")
+
+    def _scan_companies(self):
+        """Start company list scan from API."""
+        session_file = self.config.get_session_file_path()
+        if not Path(session_file).exists():
+            messagebox.showwarning(
+                "Sesión Requerida",
+                "No hay sesión guardada. Configura una sesión primero."
+            )
+            return
+
+        self.company_scan_btn.config(state='disabled')
+        self.company_status_label.config(text="🔄 Escaneando compañías...", foreground='#3498db')
+        self._add_scraper_log("🔄 Iniciando escaneo de compañías vía API...")
+
+        try:
+            self.service.start_company_scan(address_list_id=self.selected_address_list_id.get())
+        except Exception as e:
+            self._add_scraper_log(f"❌ Error al iniciar escaneo: {e}")
+            self.company_scan_btn.config(state='normal')
+            self.company_status_label.config(text="Error al escanear", foreground='#e74c3c')
+
+    def _handle_company_scan_complete(self, result):
+        """Handle company scan completion."""
+        self.root.after(0, lambda: self._on_company_scan_complete(result))
+
+    def _on_company_scan_complete(self, result):
+        """Process company scan results in GUI thread."""
+        companies = result.get('companies', [])
+        count = result.get('count', 0)
+
+        self.company_scan_btn.config(state='normal')
+        self.company_status_label.config(
+            text=f"✅ {count} compañías encontradas",
+            foreground='#27ae60'
+        )
+        self._add_scraper_log(f"✅ Escaneo completado: {count} compañías encontradas")
+
+        if companies:
+            self._populate_company_list(companies)
+            # Save to cache
+            output_dir = Path(self.config.get_excel_file_path()).parent / "gal"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            from verificacion_correo.core.gal_scraper import save_companies_cache
+            save_companies_cache(companies, output_dir)
+
+    def _handle_company_scan_error(self, error_msg):
+        """Handle company scan error."""
+        self.root.after(0, lambda: self._on_company_scan_error(error_msg))
+
+    def _on_company_scan_error(self, error_msg):
+        """Process company scan error in GUI thread."""
+        self.company_scan_btn.config(state='normal')
+        self.company_status_label.config(text="Error al escanear", foreground='#e74c3c')
+        self._add_scraper_log(f"❌ Error en escaneo: {error_msg}")
+        messagebox.showerror("Error de Escaneo", f"Error al escanear compañías:\n{error_msg}")
+
+    def _populate_company_list(self, companies):
+        """Populate the company checkbox list."""
+        # Clear existing
+        for widget in self.company_list_inner.winfo_children():
+            widget.destroy()
+        self.company_checkboxes.clear()
+        self.company_vars.clear()
+
+        # Load saved selections
+        saved_companies = set()
+        if hasattr(self.config, 'company_filter') and self.config.company_filter.companies:
+            saved_companies = set(self.config.company_filter.companies)
+
+        for company in companies:
+            var = tk.BooleanVar(value=company in saved_companies if saved_companies else True)
+            self.company_vars[company] = var
+            cb = ttk.Checkbutton(
+                self.company_list_inner,
+                text=company,
+                variable=var,
+                command=self._save_company_selection
+            )
+            cb.pack(anchor='w', padx=5)
+            self.company_checkboxes[company] = cb
+
+        # Update status
+        selected = sum(1 for v in self.company_vars.values() if v.get())
+        self.company_status_label.config(
+            text=f"✅ {len(companies)} compañías — {selected} seleccionadas",
+            foreground='#27ae60'
+        )
+
+    def _select_all_companies(self):
+        """Select all companies in the list."""
+        for var in self.company_vars.values():
+            var.set(True)
+        self._save_company_selection()
+        self._update_company_status()
+
+    def _deselect_all_companies(self):
+        """Deselect all companies in the list."""
+        for var in self.company_vars.values():
+            var.set(False)
+        self._save_company_selection()
+        self._update_company_status()
+
+    def _save_company_selection(self):
+        """Save current company selection to config."""
+        selected = [company for company, var in self.company_vars.items() if var.get()]
+
+        if not hasattr(self.config, 'company_filter'):
+            from verificacion_correo.core.config import CompanyFilterConfig
+            self.config.company_filter = CompanyFilterConfig()
+
+        self.config.company_filter.enabled = self.company_filter_enabled.get()
+        self.config.company_filter.companies = selected
+
+        try:
+            self.config.save()
+        except Exception as e:
+            logger.error(f"Error saving company filter config: {e}")
+
+        self._update_company_status()
+
+    def _update_company_status(self):
+        """Update the company status label."""
+        total = len(self.company_vars)
+        selected = sum(1 for v in self.company_vars.values() if v.get())
+        enabled = self.company_filter_enabled.get()
+
+        if total == 0:
+            self.company_status_label.config(text="No hay compañías cargadas", foreground='gray')
+        elif not enabled:
+            self.company_status_label.config(
+                text=f"⏸️ Filtro deshabilitado — {total} compañías disponibles",
+                foreground='gray'
+            )
+        else:
+            self.company_status_label.config(
+                text=f"✅ {total} compañías — {selected} seleccionadas para filtrar",
+                foreground='#27ae60'
+            )
+
+    def _on_company_filter_toggle(self):
+        """Handle company filter enable/disable toggle."""
+        self._save_company_selection()
+
+    def _get_selected_companies(self):
+        """Get list of selected company names."""
+        if not self.company_filter_enabled.get():
+            return None
+        selected = [company for company, var in self.company_vars.items() if var.get()]
+        return selected if selected else None
+
     def _start_scraper(self):
         """Start the GAL scraper via OWA API."""
         if self.scraper_active:
@@ -593,6 +1063,18 @@ class VerificacionCorreosGUI:
                 "No hay sesión guardada.\nUse el comando 'verificacion-correo setup' o el botón 'Configurar Sesión' en la pestaña de Sesión."
             )
             return
+
+        # Validate session health before starting
+        self._add_scraper_log("🔍 Validando sesión antes de iniciar...")
+        health = self.service.validate_session_api_quick()
+        if not health.get('valid'):
+            messagebox.showwarning(
+                "Sesión Inválida",
+                f"La sesión no es válida:\n{health.get('message', 'Error desconocido')}\n\n"
+                "Por favor configure una nueva sesión antes de continuar."
+            )
+            return
+        self._add_scraper_log(f"✅ Sesión válida (salud: {health.get('health', 'desconocido')})")
 
         # Confirm if resuming
         output_dir = Path(self.scraper_output_dir.get()) / "gal"
@@ -626,11 +1108,19 @@ class VerificacionCorreosGUI:
         self._add_scraper_log(f"🚀 Iniciando scraper (máx {max_contacts} contactos)...")
         self._update_scraper_status("🔄 Ejecutando...", "#3498db")
 
+        # Get company filter
+        company_filter = self._get_selected_companies()
+        if company_filter:
+            self._add_scraper_log(f"📋 Filtrando por {len(company_filter)} compañías")
+
         try:
             self.service.start_gal_scraping(
                 output_dir=str(output_dir),
                 max_contacts=max_contacts,
                 force_restart=force_restart,
+                company_filter=company_filter,
+                enrich_contacts=self.enrich_contacts_var.get(),
+                address_list_id=self.selected_address_list_id.get(),
             )
         except Exception as e:
             self._add_scraper_log(f"❌ Error al iniciar: {e}")
@@ -785,6 +1275,10 @@ class VerificacionCorreosGUI:
         self.session_indicator = ttk.Label(status_frame, text="", foreground='gray')
         self.session_indicator.pack(side='left', padx=(20, 0))
 
+        # Session health indicator (API calls used)
+        self.session_health_indicator = ttk.Label(status_frame, text="", foreground='gray')
+        self.session_health_indicator.pack(side='left', padx=(20, 0))
+
         # Clock label
         self.clock_label = ttk.Label(status_frame)
         self.clock_label.pack(side='right')
@@ -819,6 +1313,16 @@ class VerificacionCorreosGUI:
                 self._handle_gal_complete(data)
             elif item_type == 'gal_error':
                 self._handle_gal_error(data)
+            elif item_type == 'company_scan_complete':
+                self._handle_company_scan_complete(data)
+            elif item_type == 'company_scan_error':
+                self._handle_company_scan_error(data)
+            elif item_type == 'address_list_scan_complete':
+                self._handle_address_list_scan_complete(data)
+            elif item_type == 'address_list_scan_error':
+                self._handle_address_list_scan_error(data)
+            elif item_type == 'session_health':
+                self._update_session_health(data)
             elif item_type == 'progress':
                 self._update_progress(data)
 
@@ -995,6 +1499,17 @@ Resultados guardados en: {self.excel_path_var.get()}"""
             self._setup_session()
             return
 
+        # Validate session health before starting
+        self._add_log("🔍 Validando sesión antes de iniciar...")
+        health = self.service.validate_session_api_quick()
+        if not health.get('valid'):
+            messagebox.showwarning(
+                "Sesión Inválida",
+                f"La sesión no es válida:\n{health.get('message', 'Error desconocido')}\n\n"
+                "Por favor configure una nueva sesión antes de continuar."
+            )
+            return
+
         # Confirm
         if not messagebox.askyesno(
             "Confirmar Búsqueda por API",
@@ -1111,10 +1626,12 @@ Resultados guardados en: {self.excel_path_var.get()}"""
         self.scraper_active = False
 
         total = result.get("total", 0)
+        total_scanned = result.get("total_scanned", 0)
         duration = result.get("duration", 0)
         expired = result.get("expired", False)
         stopped = result.get("stopped", False)
         files = result.get("files", {})
+        filtered_companies = result.get("filtered_companies")
 
         self.scraper_extracted_count.set(total)
         self._update_scraper_progress(total)
@@ -1134,24 +1651,21 @@ Resultados guardados en: {self.excel_path_var.get()}"""
         elif stopped:
             self._update_scraper_status("⏹️ Detenido", "#e67e22")
             self._add_scraper_log(f"⏹️ Scraper detenido ({total} contactos)")
-            messagebox.showinfo(
-                "Extracción Detenida",
-                f"Scraper detenido con {total} contactos.\n\n"
-                f"Resultados guardados en:\n"
-                f"  {files.get('json', '')}\n"
-                f"  {files.get('csv', '')}"
-            )
+            msg = f"Scraper detenido con {total} contactos guardados."
+            if filtered_companies:
+                msg += f"\n\nFiltrado por: {', '.join(filtered_companies)}"
+            msg += f"\n\nResultados guardados en:\n  {files.get('json', '')}\n  {files.get('csv', '')}"
+            messagebox.showinfo("Extracción Detenida", msg)
         else:
             self._update_scraper_status("✅ Completado", "#27ae60")
             self._add_scraper_log(f"✅ Extracción completada: {total} contactos en {duration:.1f}s")
-            messagebox.showinfo(
-                "Extracción Completada",
-                f"Directorio completo extraído: {total} contactos\n\n"
-                f"Duración: {duration:.1f}s\n\n"
-                f"Resultados guardados en:\n"
-                f"  {files.get('json', '')}\n"
-                f"  {files.get('csv', '')}"
-            )
+            msg = f"Directorio extraído: {total} contactos"
+            if filtered_companies:
+                msg += f"\nFiltrado por: {', '.join(filtered_companies)}"
+            msg += f"\n\nEscaneados: {total_scanned} | Guardados: {total}"
+            msg += f"\nDuración: {duration:.1f}s"
+            msg += f"\n\nResultados guardados en:\n  {files.get('json', '')}\n  {files.get('csv', '')}"
+            messagebox.showinfo("Extracción Completada", msg)
 
         self._save_run_history("gal", {
             "total": total, "duration": duration, "expired": expired,
@@ -1245,6 +1759,42 @@ Resultados guardados en: {self.excel_path_var.get()}"""
 
         except Exception as e:
             self.session_status_text.set(f"Error: {e}")
+
+    def _update_session_health(self, health_info):
+        """Update session health indicator in status bar."""
+        calls_used = health_info.get('calls_used', 0)
+        estimated_limit = health_info.get('estimated_limit', 40)
+        health = health_info.get('health', 'unknown')
+        message = health_info.get('message', '')
+
+        # Determine color and icon based on health
+        if health == 'expired':
+            color = '#e74c3c'
+            icon = '🔴'
+            text = f"{icon} Sesión EXPIRADA"
+        elif health == 'danger':
+            color = '#e74c3c'
+            icon = '🔴'
+            text = f"{icon} Sesión inválida"
+        elif health == 'warning':
+            color = '#e67e22'
+            icon = '🟡'
+            text = f"{icon} API: {calls_used}/{estimated_limit}"
+        elif health == 'ok':
+            # Show warning color when approaching limit
+            if calls_used > 0 and calls_used >= estimated_limit * 0.7:
+                color = '#e67e22'
+                icon = '🟡'
+            else:
+                color = '#27ae60'
+                icon = '🟢'
+            text = f"{icon} API: {calls_used}/{estimated_limit}"
+        else:
+            color = 'gray'
+            icon = '⚪'
+            text = f"{icon} API: ?/?"
+
+        self.session_health_indicator.config(text=text, foreground=color)
 
     def _setup_session(self):
         """Set up browser session."""
@@ -1340,28 +1890,14 @@ Resultados guardados en: {self.excel_path_var.get()}"""
             messagebox.showwarning("Archivo no encontrado", "El archivo de Excel no existe")
             return
 
-        try:
-            if platform.system() == 'Windows':
-                os.startfile(excel_path)
-            elif platform.system() == 'Darwin':  # macOS
-                subprocess.run(['open', excel_path])
-            else:  # Linux
-                subprocess.run(['xdg-open', excel_path])
-        except Exception as e:
-            messagebox.showerror("Error", f"No se pudo abrir el archivo: {e}")
+        if not open_file(excel_path):
+            messagebox.showerror("Error", "No se pudo abrir el archivo Excel")
 
     def _open_data_folder(self):
         """Open data folder in system file explorer."""
         data_path = Path(self.config.get_excel_file_path()).parent
-        try:
-            if platform.system() == 'Windows':
-                os.startfile(str(data_path))
-            elif platform.system() == 'Darwin':  # macOS
-                subprocess.run(['open', str(data_path)])
-            else:  # Linux
-                subprocess.run(['xdg-open', str(data_path)])
-        except Exception as e:
-            messagebox.showerror("Error", f"No se pudo abrir la carpeta: {e}")
+        if not open_folder(data_path):
+            messagebox.showerror("Error", "No se pudo abrir la carpeta de datos")
 
     def _refresh_results_tree(self):
         """Refresh results treeview from Excel file."""
@@ -1435,12 +1971,8 @@ Resultados guardados en: {self.excel_path_var.get()}"""
         """Open scraper output directory in file explorer."""
         output_dir = Path(self.config.get_excel_file_path()).parent / "gal"
         if output_dir.exists():
-            if platform.system() == 'Darwin':
-                subprocess.run(['open', str(output_dir)])
-            elif platform.system() == 'Windows':
-                os.startfile(str(output_dir))
-            else:
-                subprocess.run(['xdg-open', str(output_dir)])
+            if not open_folder(output_dir):
+                messagebox.showerror("Error", "No se pudo abrir la carpeta de resultados")
         else:
             messagebox.showinfo("Sin resultados", "No hay resultados de extracción aún. Ejecuta el scraper primero.")
 

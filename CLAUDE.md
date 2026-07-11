@@ -12,16 +12,23 @@ Automatización Python que extrae contactos del directorio OWA de Madrid (correo
   - `_find_persona_id()`: busca en GAL por email → obtiene PersonaId
   - `_get_persona()`: obtiene datos completos (phone, address, SIP, dept, etc.)
   - `_parse_persona()`: convierte respuesta JSON a `ContactInfo`
+  - `validate_session_api()`: validación ligera sin Playwright (FindPeople sin query)
   - `SessionExpiredError`: se lanza cuando OWA responde HTTP 307 (sesión expirada)
   - `process_emails_via_api()`: orquesta procesamiento batch completo
+  - `SESSION_HEALTH_CHECK_INTERVAL = 5`, `SESSION_ESTIMATED_LIMIT = 40` — checks each 5 calls
   - Usa `urllib` + cookies de sesión (`state.json`), sin Playwright
   - Delay entre requests: 3s
   - Timeout: 60s
 
 - **gal_scraper.py** — Extracción completa del GAL (Global Address List).
   - `scrape_gal()`: paginación con Offset, reanudable vía `ProgressFile`
-  - `ProgressFile`: guarda offset + contador en `gal_progress.json`
+  - `company_filter` param: filtrado server-side via AQS QueryString en FindPeople
+  - Cuando `company_filter` está activo, itera compañía por compañía (más rápido, menos carga de red)
+  - `enrich_contacts` param: llama a GetPersona por cada contacto para datos completos (phone, dept, address)
+  - `ProgressFile`: guarda offset + contador + `completed_companies` para resumir por compañía
   - `_flatten_persona()`: aplanado para CSV
+  - `_enrich_persona()`: enriquece contacto vía GetPersona (phone, department, office, address)
+  - `_build_find_people_payload()`: construye payload JSON con `query_string` para QueryString AQS
   - Exporta a JSON + CSV (delimitador `;`)
   - Delay configurable (default 8s), batch size 100
   - Acepta `stop_flag` (dict con `{"stop": bool}`) para parada externa
@@ -76,7 +83,9 @@ Automatización Python que extrae contactos del directorio OWA de Madrid (correo
   - `setup`: configura sesión
   - `validate`: valida setup
   - `status`: muestra estado
-  - `scrape-gallery`: GAL vía API, con --output-dir, --max-contacts, --batch-size, --delay, --force-restart
+  - `scrape-gallery`: GAL vía API, con --output-dir, --max-contacts, --batch-size, --delay, --force-restart, --company-filter, --enrich
+    - `--company-filter`: descarga todo el GAL y filtra client-side por CompanyName (Exchange OWA FindPeople NO soporta filtrado server-side por compañía — Restriction devuelve HTTP 500)
+    - `--enrich`: tras filtrar, enriquecen los resultados con GetPersona (teléfono, departamento, dirección)
 - `__main__.py` → `python -m verificacion_correo` lanza CLI
 
 ### GUI (`gui/main.py`)
@@ -108,6 +117,7 @@ Sistema incremental: solo procesa filas con Status vacío. `ExcelColumns` clase 
 - Guardar: `verificacion-correo setup` → login manual en navegador
 - Archivo: `state.json` (Playwright storage_state con cookies)
 - La sesión expira tras ~40-50 llamadas API → HTTP 307 → `SessionExpiredError`
+- Health check cada 5 llamadas (`SESSION_HEALTH_CHECK_INTERVAL = 5`)
 - `_build_cookie_header()` extrae cookies del state.json
 - `_get_canary()` extrae `X-OWA-CANARY` de cookies o localStorage
 
@@ -130,7 +140,7 @@ stats = process_emails_via_api("data/correos.xlsx", "state.json", batch_size=10)
 ```python
 from verificacion_correo.core.gal_scraper import scrape_gal
 
-stats = scrape_gal("state.json", output_dir="data/gal", max_contacts=0, batch_size=100)
+stats = scrape_gal("state.json", output_dir="data/gal", max_contacts=0, batch_size=100, company_filter=["ORGANOS JUDICIALES"], enrich_contacts=True)
 ```
 
 ### Sesión expirada

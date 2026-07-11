@@ -75,7 +75,7 @@ class TestGALScrapingFlow:
         pf = ProgressFile(tmp_path)
 
         assert not pf.exists
-        assert pf.load() == {"offset": 0, "people": []}
+        assert pf.load() == {"offset": 0, "people": [], "completed_companies": []}
 
         people = [SAMPLE_PERSONA]
         pf.save(offset=100, people=people)
@@ -96,13 +96,13 @@ class TestGALScrapingFlow:
 
         pf.clear()
         assert not pf.exists
-        assert pf.load() == {"offset": 0, "people": []}
+        assert pf.load() == {"offset": 0, "people": [], "completed_companies": []}
 
     def test_progress_file_load_missing_returns_defaults(self, tmp_path: Path) -> None:
         """load() en directorio vacío retorna defaults."""
         pf = ProgressFile(tmp_path / "nonexistent")
         result = pf.load()
-        assert result == {"offset": 0, "people": []}
+        assert result == {"offset": 0, "people": [], "completed_companies": []}
 
     def test_progress_file_load_corrupt_json(self, tmp_path: Path) -> None:
         """load() con JSON corrupto levanta error."""

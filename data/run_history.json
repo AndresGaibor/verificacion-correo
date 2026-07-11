@@ -1,0 +1,92 @@
+[
+  {
+    "type": "gal",
+    "timestamp": "2026-07-11T15:19:26.761635",
+    "stats": {
+      "total": 100,
+      "duration": 9.776831150054932,
+      "expired": false,
+      "stopped": false,
+      "files": {
+        "json": "/Users/andresgaibor/code/python/verificacion-correo/data/gal/directorio_completo.json",
+        "csv": "/Users/andresgaibor/code/python/verificacion-correo/data/gal/directorio_completo.csv",
+        "progress": "/Users/andresgaibor/code/python/verificacion-correo/data/gal/gal_progress.json"
+      }
+    }
+  },
+  {
+    "type": "gal",
+    "timestamp": "2026-07-11T15:24:58.404730",
+    "stats": {
+      "total": 100,
+      "duration": 11.570436954498291,
+      "expired": false,
+      "stopped": false,
+      "files": {
+        "json": "/Users/andresgaibor/code/python/verificacion-correo/data/gal/directorio_completo.json",
+        "csv": "/Users/andresgaibor/code/python/verificacion-correo/data/gal/directorio_completo.csv",
+        "progress": "/Users/andresgaibor/code/python/verificacion-correo/data/gal/gal_progress.json"
+      }
+    }
+  },
+  {
+    "type": "gal",
+    "timestamp": "2026-07-11T15:29:12.940002",
+    "stats": {
+      "total": 100,
+      "duration": 11.90883207321167,
+      "expired": false,
+      "stopped": false,
+      "files": {
+        "json": "/Users/andresgaibor/code/python/verificacion-correo/data/gal/directorio_completo.json",
+        "csv": "/Users/andresgaibor/code/python/verificacion-correo/data/gal/directorio_completo.csv",
+        "progress": "/Users/andresgaibor/code/python/verificacion-correo/data/gal/gal_progress.json"
+      }
+    }
+  },
+  {
+    "type": "gal",
+    "timestamp": "2026-07-11T15:31:02.995397",
+    "stats": {
+      "total": 100,
+      "duration": 11.800009965896606,
+      "expired": false,
+      "stopped": false,
+      "files": {
+        "json": "/Users/andresgaibor/code/python/verificacion-correo/data/gal/directorio_completo.json",
+        "csv": "/Users/andresgaibor/code/python/verificacion-correo/data/gal/directorio_completo.csv",
+        "progress": "/Users/andresgaibor/code/python/verificacion-correo/data/gal/gal_progress.json"
+      }
+    }
+  },
+  {
+    "type": "gal",
+    "timestamp": "2026-07-11T15:35:48.198998",
+    "stats": {
+      "total": 100,
+      "duration": 11.571803092956543,
+      "expired": false,
+      "stopped": false,
+      "files": {
+        "json": "/Users/andresgaibor/code/python/verificacion-correo/data/gal/directorio_completo.json",
+        "csv": "/Users/andresgaibor/code/python/verificacion-correo/data/gal/directorio_completo.csv",
+        "progress": "/Users/andresgaibor/code/python/verificacion-correo/data/gal/gal_progress.json"
+      }
+    }
+  },
+  {
+    "type": "gal",
+    "timestamp": "2026-07-11T16:00:49.566746",
+    "stats": {
+      "total": 500,
+      "duration": 49.223124980926514,
+      "expired": false,
+      "stopped": false,
+      "files": {
+        "json": "/Users/andresgaibor/code/python/verificacion-correo/data/gal/directorio_completo.json",
+        "csv": "/Users/andresgaibor/code/python/verificacion-correo/data/gal/directorio_completo.csv",
+        "progress": "/Users/andresgaibor/code/python/verificacion-correo/data/gal/gal_progress.json"
+      }
+    }
+  }
+]

@@ -17,6 +17,7 @@ from verificacion_correo.core.browser import BrowserAutomation, process_emails
 from verificacion_correo.core.session import setup_session_interactive, validate_saved_session, get_session_status
 from verificacion_correo.core.excel import ExcelReader
 from verificacion_correo.core.gal_scraper import scrape_gal
+from verificacion_correo.core.api_extractor import get_people_filters, SessionExpiredError
 from verificacion_correo.utils.logging import setup_logging, get_logger
 
 
@@ -176,6 +177,28 @@ Examples:
             "--force-restart",
             action="store_true",
             help="Ignore saved progress and start from scratch"
+        )
+        gallery_parser.add_argument(
+            "--company-filter",
+            nargs="+",
+            metavar="COMPANY",
+            help="Only extract contacts from these companies (server-side AQS filtering)"
+        )
+        gallery_parser.add_argument(
+            "--enrich",
+            action="store_true",
+            help="Fetch full contact details via GetPersona (phone, dept, address — slower)"
+        )
+        gallery_parser.add_argument(
+            "--address-list-id",
+            type=str,
+            default="fed75805-8ba2-4323-9f6d-80be7e3abc6a",
+            help="AddressList GUID to use (default: fed75805-8ba2-4323-9f6d-80be7e3abc6a)"
+        )
+        gallery_parser.add_argument(
+            "--list-address-lists",
+            action="store_true",
+            help="Fetch and display all available address lists from OWA, then exit"
         )
         gallery_parser.set_defaults(func=self._cmd_scrape_gallery)
 
@@ -376,19 +399,44 @@ Examples:
 
     def _cmd_scrape_gallery(self, args):
         """Scrape full GAL directory command."""
-        print("=" * 70)
-        print("EXTRACCIÓN DEL DIRECTORIO (GAL) VÍA API")
-        print("=" * 70)
-
         session_file = self.config.get_session_file_path()
         if not Path(session_file).exists():
             print("❌ No hay sesión guardada")
             print("   Ejecute 'verificacion-correo setup' primero")
             return 1
 
+        # Handle --list-address-lists first
+        if getattr(args, 'list_address_lists', False):
+            print("=" * 70)
+            print("LISTA DE DIRECCIONES DISPONIBLES EN OWA")
+            print("=" * 70)
+            try:
+                address_lists = get_people_filters(session_file)
+                print(f"\n🔍 {len(address_lists)} listas encontradas:\n")
+                for al in address_lists:
+                    print(f"  📋 {al['DisplayName']}")
+                    print(f"     ID: {al['FolderId']['Id']}")
+                    print()
+            except SessionExpiredError:
+                print("❌ Sesión expirada — necesita reautenticarse")
+                return 1
+            except Exception as e:
+                print(f"❌ Error: {e}")
+                return 1
+            return 0
+
+        print("=" * 70)
+        print("EXTRACCIÓN DEL DIRECTORIO (GAL) VÍA API")
+        print("=" * 70)
+
         output_dir = args.output_dir
         max_contacts = args.max_contacts
         force_restart = args.force_restart
+        company_filter = args.company_filter
+        enrich = args.enrich
+        address_list_id = getattr(args, 'address_list_id', None) or "fed75805-8ba2-4323-9f6d-80be7e3abc6a"
+
+        print(f"\n📋 AddressList ID: {address_list_id}")
 
         # Check progress file for resume
         progress_file = Path(output_dir) / "gal_progress.json"
@@ -398,6 +446,9 @@ Examples:
             print(f"\n⏳ Progreso anterior encontrado:")
             print(f"   Offset: {prev.get('offset', 0)}")
             print(f"   Contactos: {prev.get('count', 0)}")
+            completed = prev.get("completed_companies", [])
+            if completed:
+                print(f"   Compañías completadas: {len(completed)}")
             print(f"   Última actualización: {prev.get('last_update', 'N/A')}")
             try:
                 resp = input("\n¿Reanudar? [S/n]: ").strip().lower()
@@ -415,6 +466,11 @@ Examples:
             print(f"🎯 Máx contactos: {max_contacts}")
         else:
             print(f"🎯 Máx contactos: ilimitado")
+        if company_filter:
+            print(f"🏢 Filtrar por compañía: {', '.join(company_filter)}")
+            print("   (filtrado client-side tras descarga completa del GAL)")
+        if enrich:
+            print("📋 Enriquecer contactos (GetPersona — teléfono, dept, dirección)")
         if force_restart:
             print("🔄 Forzando reinicio (ignorando progreso)")
 
@@ -433,13 +489,22 @@ Examples:
             batch_size=args.batch_size,
             request_delay=args.delay,
             force_restart=force_restart,
+            company_filter=company_filter,
+            enrich_contacts=enrich,
+            address_list_id=address_list_id,
         )
 
         print("\n" + "=" * 70)
         print("EXTRACCIÓN COMPLETADA")
         print("=" * 70)
         print(f"📧 Total contactos: {stats['total']}")
+        if stats.get('total_scanned'):
+            print(f"🔍 Escaneados (API): {stats['total_scanned']}")
         print(f"⏱️  Duración: {stats['duration']:.1f}s")
+
+        if company_filter:
+            completed = stats.get('completed_companies', [])
+            print(f"🏢 Compañías procesadas: {len(completed)}/{len(company_filter)}")
 
         if stats['expired']:
             print("⚠️  Sesión expirada — progreso guardado para reanudar")

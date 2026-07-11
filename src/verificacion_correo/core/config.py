@@ -48,6 +48,17 @@ class ProcessingConfig:
 
 
 @dataclass
+class CompanyFilterConfig:
+    """Company filter configuration for GAL scraping."""
+    enabled: bool = False
+    companies: List[str] = None
+
+    def __post_init__(self):
+        if self.companies is None:
+            self.companies = []
+
+
+@dataclass
 class Selectors:
     """CSS selectors for OWA interface elements."""
     new_message_btn: str = 'button[title="Escribir un mensaje nuevo (N)"]'
@@ -259,6 +270,10 @@ class Config:
         # Regex patterns are fixed
         self.patterns = RegexPatterns()
 
+        # Company filter
+        company_filter_data = self._config_data.get('company_filter', {})
+        self.company_filter = CompanyFilterConfig(**company_filter_data)
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert config to YAML-serializable dict."""
         return {
@@ -293,6 +308,10 @@ class Config:
                 'popup_load_data': self.wait_times.popup_load_data,
                 'after_close_popup': self.wait_times.after_close_popup,
                 'before_discard': self.wait_times.before_discard
+            },
+            'company_filter': {
+                'enabled': self.company_filter.enabled,
+                'companies': self.company_filter.companies or []
             }
         }
 
