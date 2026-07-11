@@ -8,6 +8,7 @@ structured data management.
 
 import os
 import sys
+import time
 import shutil
 from enum import Enum
 from pathlib import Path
@@ -20,6 +21,9 @@ from verificacion_correo.utils.logging import get_logger
 
 
 logger = get_logger(__name__)
+
+MAX_RETRIES = 3
+RETRY_DELAY = 0.5
 
 
 class ProcessingStatus(Enum):
@@ -431,34 +435,44 @@ class ExcelWriter:
 
     def write_result(self, record: EmailRecord):
         """
-        Write processing result for a single email record.
+        Write processing result for a single email record with retry.
 
         Args:
             record: EmailRecord with processing results
         """
         self.ensure_file_structure()
 
-        try:
-            wb = load_workbook(self.file_path)
-            ws = wb.active
+        for attempt in range(MAX_RETRIES):
+            try:
+                wb = load_workbook(self.file_path)
+                ws = wb.active
 
-            # Write status
-            status_cell = ws.cell(row=record.row, column=self.columns.STATUS.index)
-            status_cell.value = record.status.value
+                # Write status
+                status_cell = ws.cell(row=record.row, column=self.columns.STATUS.index)
+                status_cell.value = record.status.value
 
-            # Write data if processing was successful
-            if record.status == ProcessingStatus.SUCCESS and record.data:
-                self._write_contact_data(ws, record)
-            elif record.status in [ProcessingStatus.ERROR, ProcessingStatus.NOT_FOUND]:
-                self._clear_contact_data(ws, record)
+                # Write data if processing was successful
+                if record.status == ProcessingStatus.SUCCESS and record.data:
+                    self._write_contact_data(ws, record)
+                elif record.status in [ProcessingStatus.ERROR, ProcessingStatus.NOT_FOUND]:
+                    self._clear_contact_data(ws, record)
 
-            wb.save(self.file_path)
-            wb.close()
+                wb.save(self.file_path)
+                wb.close()
 
-            logger.debug(f"Wrote result for {record.email}: {record.status.value}")
+                logger.debug(f"Wrote result for {record.email}: {record.status.value}")
+                return
 
-        except Exception as e:
-            logger.error(f"Error writing result for {record.email}: {e}")
+            except PermissionError as e:
+                if attempt < MAX_RETRIES - 1:
+                    logger.warning(f"File locked, retrying in {RETRY_DELAY}s (attempt {attempt + 1}/{MAX_RETRIES})")
+                    time.sleep(RETRY_DELAY * (attempt + 1))
+                else:
+                    logger.error(f"Error writing result for {record.email} after {MAX_RETRIES} attempts: {e}")
+
+            except Exception as e:
+                logger.error(f"Error writing result for {record.email}: {e}")
+                return
 
     def _write_contact_data(self, ws, record: EmailRecord):
         """Write contact data to worksheet."""
