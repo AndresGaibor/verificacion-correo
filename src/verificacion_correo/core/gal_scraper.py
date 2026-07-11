@@ -166,7 +166,9 @@ class ProgressFile:
     def load(self) -> Dict[str, Any]:
         if self.path.exists():
             with open(self.path, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+            data.setdefault("people", [])
+            return data
         return {"offset": 0, "people": []}
 
     def save(self, offset: int, people: List[dict]):
@@ -214,6 +216,17 @@ def scrape_gal(
     Returns:
         Dict with stats (total, offset_end, expired, files, etc.).
     """
+    if not session_file or not Path(session_file).exists():
+        raise FileNotFoundError(f"Session file not found: {session_file}")
+    if not output_dir:
+        raise ValueError("output_dir cannot be empty")
+    if max_contacts < 0:
+        raise ValueError(f"max_contacts must be >= 0, got {max_contacts}")
+    if batch_size <= 0:
+        raise ValueError(f"batch_size must be > 0, got {batch_size}")
+    if request_delay < 0:
+        raise ValueError(f"request_delay must be >= 0, got {request_delay}")
+
     start = time.time()
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -231,10 +244,10 @@ def scrape_gal(
         state = {"offset": 0, "people": []}
     else:
         state = progress.load()
-        logger.info(f"Resuming from offset {state['offset']} ({len(state['people'])} contacts already fetched)")
 
-    offset = state["offset"]
-    all_people = state["people"]
+    offset = state.get("offset", 0)
+    all_people = state.get("people", [])
+    logger.info(f"Resuming from offset {offset} ({len(all_people)} contacts already fetched)")
     session_expired = False
     total_fetched = len(all_people)
     consecutive_failures = 0
