@@ -257,7 +257,7 @@ class FirstRunManager:
         try:
             marker = self._get_marker_path()
             marker.parent.mkdir(parents=True, exist_ok=True)
-            with open(marker, 'w') as f:
+            with open(marker, 'w', encoding='utf-8') as f:
                 f.write("First run completed\n")
                 f.write(f"Config: {self.config._config_path}\n")
                 f.write(f"Excel: {self.config.get_excel_file_path()}\n")

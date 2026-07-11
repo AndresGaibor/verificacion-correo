@@ -1342,7 +1342,7 @@ Resultados guardados en: {self.excel_path_var.get()}"""
 
         try:
             if platform.system() == 'Windows':
-                subprocess.startfile(excel_path)
+                os.startfile(excel_path)
             elif platform.system() == 'Darwin':  # macOS
                 subprocess.run(['open', excel_path])
             else:  # Linux
@@ -1355,7 +1355,7 @@ Resultados guardados en: {self.excel_path_var.get()}"""
         data_path = Path(self.config.get_excel_file_path()).parent
         try:
             if platform.system() == 'Windows':
-                subprocess.startfile(str(data_path))
+                os.startfile(str(data_path))
             elif platform.system() == 'Darwin':  # macOS
                 subprocess.run(['open', str(data_path)])
             else:  # Linux
@@ -1463,7 +1463,7 @@ Resultados guardados en: {self.excel_path_var.get()}"""
         history = []
         if history_file.exists():
             try:
-                with open(history_file) as f:
+                with open(history_file, encoding='utf-8') as f:
                     history = json.load(f)
             except (json.JSONDecodeError, IOError):
                 pass
@@ -1474,7 +1474,7 @@ Resultados guardados en: {self.excel_path_var.get()}"""
         })
         history = history[-20:]
         try:
-            with open(history_file, 'w') as f:
+            with open(history_file, 'w', encoding='utf-8') as f:
                 json.dump(history, f, indent=2, default=str)
         except IOError:
             pass

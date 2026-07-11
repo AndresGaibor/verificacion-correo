@@ -362,7 +362,7 @@ class SessionManager:
 
             # Try to load session data
             import json
-            with open(self.session_file, 'r') as f:
+            with open(self.session_file, 'r', encoding='utf-8') as f:
                 session_data = json.load(f)
 
             cookies_count = len(session_data.get('cookies', []))
