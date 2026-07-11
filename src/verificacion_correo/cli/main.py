@@ -265,7 +265,7 @@ Examples:
             print("\n🔍 DRY RUN MODE - No processing will be performed")
             print("   First 5 pending emails:")
             for i, batch in enumerate(summary.batches[:1]):
-                for j, record in enumerate(batch.records[:5]):
+                for j, record in enumerate(batch[:5]):
                     print(f"   {j+1}. {record.email}")
             return 0
 
