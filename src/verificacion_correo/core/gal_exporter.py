@@ -1,15 +1,19 @@
-"""GAL Excel exporter con 2 hojas: Contactos + Compañías."""
+"""GAL Excel exporter con 2 hojas: Contactos + Compañías.
+
+Sheet1 (Contactos) se actualiza con upsert por persona_id.
+Sheet2 (Compañías) lista empresas extraídas para filtrar enrichment.
+"""
 
 from pathlib import Path
 from typing import List, Dict, Any, Optional
-import json
-from openpyxl import Workbook
+from openpyxl import load_workbook, Workbook
+from openpyxl.styles import Font
 
 CONTACT_FIELDS = ['nombre', 'email', 'empresa', 'telefono', 'departamento', 'oficina', 'direccion', 'persona_id']
 
 
 def flatten_contact_to_dict(persona: dict) -> dict:
-    """Convierte persona del GAL a dict plano extrayendo todos los campos disponibles."""
+    """Convierte persona del GAL a dict plano."""
     name = persona.get("DisplayName") or ""
 
     email_obj = persona.get("EmailAddress") or persona.get("EmailAddresses") or []
@@ -43,13 +47,7 @@ def flatten_contact_to_dict(persona: dict) -> dict:
     if addr_items and isinstance(addr_items[0], dict):
         val = addr_items[0].get("Value") or {}
         if isinstance(val, dict):
-            parts = [
-                val.get("Street") or "",
-                val.get("City") or "",
-                val.get("State") or "",
-                val.get("PostalCode") or "",
-                val.get("Country") or "",
-            ]
+            parts = [val.get("Street") or "", val.get("City") or "", val.get("PostalCode") or "", val.get("State") or ""]
             parts = [p for p in parts if p.strip()]
             address = ", ".join(parts) if parts else ""
         elif isinstance(val, str):
@@ -61,29 +59,13 @@ def flatten_contact_to_dict(persona: dict) -> dict:
         persona_id = persona_id_obj.get("Id") or ""
 
     return {
-        'nombre': name,
-        'email': email,
-        'empresa': company,
-        'telefono': phone,
-        'departamento': department,
-        'oficina': office,
-        'direccion': address,
-        'persona_id': persona_id,
+        'nombre': name, 'email': email, 'empresa': company,
+        'telefono': phone, 'departamento': department,
+        'oficina': office, 'direccion': address, 'persona_id': persona_id,
     }
 
 
-def extract_companies_from_contacts(contacts: List[dict]) -> List[str]:
-    """Extrae lista única de compañías de contactos."""
-    companies = set()
-    for c in contacts:
-        company = c.get('empresa', '').strip()
-        if company:
-            companies.add(company)
-    return sorted(companies)
-
-
 def _auto_width(ws):
-    """Ajusta ancho de columnas automáticamente."""
     for col in ws.columns:
         max_length = 0
         col_letter = col[0].column_letter
@@ -93,52 +75,77 @@ def _auto_width(ws):
         ws.column_dimensions[col_letter].width = min(max_length + 2, 40)
 
 
-def save_to_excel(contacts: List[dict], output_path: Path, cache_path: Optional[Path] = None):
-    """Guarda contactos en Excel de 2 hojas.
+def append_contacts_to_excel(contacts: List[dict], excel_path: Path):
+    """Upsert contacts en Sheet1 del Excel por persona_id.
 
-    Sheet1: Contactos con todos los campos
-    Sheet2: Compañías con checkbox Enrich
+    Sheet2 (Compañías) se recalcula automáticamente.
+    Si el archivo no existe, lo crea con las 2 hojas.
     """
-    from openpyxl.styles import Font
+    excel_path = Path(excel_path)
+    excel_path.parent.mkdir(parents=True, exist_ok=True)
 
-    wb = Workbook()
+    if excel_path.exists():
+        wb = load_workbook(excel_path)
+        ws1 = wb["Contactos"]
+    else:
+        wb = Workbook()
+        ws1 = wb.active
+        ws1.title = "Contactos"
+        ws1.append(CONTACT_FIELDS)
+        for cell in ws1[1]:
+            cell.font = Font(bold=True)
 
-    ws1 = wb.active
-    ws1.title = "Contactos"
-    ws1.append(CONTACT_FIELDS)
-    for cell in ws1[1]:
-        cell.font = Font(bold=True)
+    existing_rows: Dict[str, int] = {}
+    for row_idx in range(2, ws1.max_row + 1):
+        pid = ws1.cell(row_idx, 8).value
+        if pid:
+            existing_rows[pid] = row_idx
+
     for contact in contacts:
-        row = [contact.get(f, '') for f in CONTACT_FIELDS]
-        ws1.append(row)
-    _auto_width(ws1)
+        pid = contact.get('persona_id', '')
+        if pid and pid in existing_rows:
+            row_idx = existing_rows[pid]
+            for col_idx, field in enumerate(CONTACT_FIELDS, 1):
+                val = contact.get(field, '')
+                if val:
+                    ws1.cell(row_idx, col_idx).value = val
+        else:
+            row = [contact.get(f, '') for f in CONTACT_FIELDS]
+            ws1.append(row)
+            if pid:
+                existing_rows[pid] = ws1.max_row
 
+    if "Compañías" in wb.sheetnames:
+        del wb["Compañías"]
     ws2 = wb.create_sheet("Compañías")
     ws2.append(['Compañía', 'Enrich'])
     for cell in ws2[1]:
         cell.font = Font(bold=True)
-    companies = extract_companies_from_contacts(contacts)
-    for company in companies:
+
+    companies = set()
+    for row_idx in range(2, ws1.max_row + 1):
+        company = ws1.cell(row_idx, 3).value
+        if company:
+            companies.add(company)
+    for company in sorted(companies):
         ws2.append([company, ''])
+
+    _auto_width(ws1)
     _auto_width(ws2)
-
-    wb.save(output_path)
-
-    if cache_path:
-        with open(cache_path, 'w', encoding='utf-8') as f:
-            json.dump(contacts, f, ensure_ascii=False, indent=2)
+    wb.save(excel_path)
 
 
-def load_gal_cache(cache_path: Path) -> List[dict]:
-    """Carga GAL cache desde JSON (flattened version with persona_id)."""
-    with open(cache_path, 'r', encoding='utf-8') as f:
-        return json.load(f)
-
-
-def load_raw_gal_cache(output_dir: Path) -> List[dict]:
-    """Carga GAL cache raw desde directorio_completo.json (con PersonaId)."""
-    raw_path = output_dir / "directorio_completo.json"
-    if not raw_path.exists():
+def load_gal_from_excel(excel_path: Path) -> List[dict]:
+    """Carga contactos desde Sheet1 del Excel."""
+    if not excel_path.exists():
         return []
-    with open(raw_path, 'r', encoding='utf-8') as f:
-        return json.load(f)
+    wb = load_workbook(excel_path)
+    ws1 = wb["Contactos"]
+    headers = [cell.value for cell in ws1[1]]
+    contacts = []
+    for row_idx in range(2, ws1.max_row + 1):
+        contact = {}
+        for col_idx, header in enumerate(headers, 1):
+            contact[header] = ws1.cell(row_idx, col_idx).value
+        contacts.append(contact)
+    return contacts

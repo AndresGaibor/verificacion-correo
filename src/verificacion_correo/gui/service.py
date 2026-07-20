@@ -132,12 +132,11 @@ class GUIService:
 
     def start_gal_scraping(
         self,
-        output_dir: str,
+        excel_path: str,
         max_contacts: int = 0,
         force_restart: bool = False,
         company_filter: Optional[list] = None,
         address_list_id: Optional[str] = None,
-        output_excel: Optional[str] = None,
     ) -> None:
         """Start GAL directory scraping in background thread."""
         if self.is_processing:
@@ -162,7 +161,7 @@ class GUIService:
 
                 result = scrape_gal(
                     session_file=session_file,
-                    output_dir=output_dir,
+                    excel_path=excel_path,
                     max_contacts=max_contacts,
                     force_restart=force_restart,
                     progress_callback=progress_callback,
@@ -170,7 +169,6 @@ class GUIService:
                     stop_flag=stop_flag,
                     company_filter=company_filter,
                     address_list_id=address_list_id or "fed75805-8ba2-4323-9f6d-80be7e3abc6a",
-                    output_excel=output_excel,
                 )
                 self.progress_queue.put(('gal_complete', result))
             except Exception as e:
@@ -187,7 +185,7 @@ class GUIService:
         if hasattr(self, '_gal_stop_flag'):
             self._gal_stop_flag['stop'] = True
 
-    def start_enrichment(self, excel_path: str, cache_path: str) -> None:
+    def start_enrichment(self, excel_path: str) -> None:
         """Start enrichment in background thread."""
         if self.is_processing:
             raise RuntimeError("Processing already active")
@@ -198,14 +196,10 @@ class GUIService:
         def enrich_thread():
             try:
                 from verificacion_correo.core.gal_enricher import enrich_excel_by_companies, get_companies_to_enrich_from_excel
-                from verificacion_correo.core.gal_exporter import load_raw_gal_cache
                 from pathlib import Path
 
                 excel_p = Path(excel_path)
-                cache_p = Path(cache_path)
-                output_dir = cache_p.parent
 
-                cache = load_raw_gal_cache(output_dir)
                 companies = get_companies_to_enrich_from_excel(excel_p)
 
                 if not companies:
@@ -219,8 +213,6 @@ class GUIService:
 
                 logger.info(f"Starting enrichment for {len(companies)} companies")
 
-                progress_path = excel_p.parent / "enrich_progress.json"
-
                 def progress_callback(enriched_count, total):
                     self.progress_queue.put(('enrich_progress', {
                         'count': enriched_count,
@@ -230,8 +222,6 @@ class GUIService:
                 result = enrich_excel_by_companies(
                     excel_p,
                     companies,
-                    cache,
-                    progress_path=progress_path,
                     progress_callback=progress_callback,
                 )
                 self.progress_queue.put(('enrich_complete', result))

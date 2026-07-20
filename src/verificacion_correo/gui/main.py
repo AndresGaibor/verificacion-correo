@@ -1072,18 +1072,14 @@ class VerificacionCorreosGUI:
 
         # Confirm if resuming
         output_dir = Path(self.scraper_output_dir.get()) / "gal"
-        excel_path = output_dir / "gal_export.xlsx"
-        progress_file = output_dir / "gal_progress.json"
-        if progress_file.exists():
-            with open(progress_file) as f:
-                prev = json.load(f)
+        excel_path = output_dir / "gal_directorio.xlsx"
+        if excel_path.exists():
             resume = messagebox.askyesno(
                 "Reanudar Extracción",
-                f"Se encontró un progreso anterior:\n"
-                f"  Offset: {prev.get('offset', 0)}\n"
-                f"  Contactos: {prev.get('count', 0)}\n\n"
-                f"¿Desea reanudar desde donde se quedó?\n\n"
-                f"Seleccione 'No' para empezar desde cero."
+                f"Se encontró una extracción anterior:\n"
+                f"{excel_path}\n\n"
+                f"¿Desea continuar desde donde se quedó?\n\n"
+                f"Seleccione 'No' para empezar desde cero (sobrescribirá)."
             )
             force_restart = not resume
         else:
@@ -1110,12 +1106,11 @@ class VerificacionCorreosGUI:
 
         try:
             self.service.start_gal_scraping(
-                output_dir=str(output_dir),
+                excel_path=str(excel_path),
                 max_contacts=max_contacts,
                 force_restart=force_restart,
                 company_filter=company_filter,
                 address_list_id=self.selected_address_list_id.get(),
-                output_excel=str(excel_path),
             )
         except Exception as e:
             self._add_scraper_log(f"❌ Error al iniciar: {e}")
@@ -1137,16 +1132,11 @@ class VerificacionCorreosGUI:
         self.scraper_stop_btn.config(state='disabled')
 
     def _start_enrichment(self):
-        """Start enrichment of contacts from cache."""
-        excel_path = Path(self.scraper_output_dir.get()) / "gal" / "gal_export.xlsx"
-        cache_path = Path(self.scraper_output_dir.get()) / "gal" / "cache.json"
+        """Start enrichment of contacts from Excel."""
+        excel_path = Path(self.scraper_output_dir.get()) / "gal" / "gal_directorio.xlsx"
 
         if not excel_path.exists():
             messagebox.showwarning("Error", "Primero ejecuta Extracción GAL")
-            return
-
-        if not cache_path.exists():
-            messagebox.showwarning("Error", "No se encontró cache.json. Ejecuta extracción primero.")
             return
 
         from openpyxl import load_workbook
@@ -1175,7 +1165,7 @@ class VerificacionCorreosGUI:
         self._update_scraper_status("🔄 Completando...", "#3498db")
 
         try:
-            self.service.start_enrichment(str(excel_path), str(cache_path))
+            self.service.start_enrichment(str(excel_path))
             self.scraper_start_btn.config(state='disabled')
             self.enrich_btn.config(state='disabled')
             self.scraper_active = True

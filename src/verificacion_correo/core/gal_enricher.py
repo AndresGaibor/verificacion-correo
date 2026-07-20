@@ -1,7 +1,11 @@
-"""GAL enrichment selectivo por compañía usando GetPersona API."""
+"""GAL enrichment selectivo por compañía usando GetPersona API.
+
+Lee directamente de Sheet1 del Excel (Contactos) y actualiza la misma fila.
+No usa JSON cache - el Excel es la fuente de verdad.
+"""
 
 from pathlib import Path
-from typing import List, Dict, Any, Set, Optional, Callable
+from typing import List, Dict, Any, Optional, Callable
 import json
 import time
 from openpyxl import load_workbook
@@ -81,52 +85,10 @@ def _call_get_persona(persona_id: str, cookie_str: str, canary: str) -> Optional
         return None
 
 
-class EnrichProgress:
-    """Trackea progreso de enrichment para reanudación."""
-
-    def __init__(self, path: Path):
-        self.path = path
-        self.data: Dict[str, Any] = {
-            'companies_done': [],
-            'contacts_enriched': 0,
-            'offset': 0,
-        }
-
-    def save(self):
-        with open(self.path, 'w', encoding='utf-8') as f:
-            json.dump(self.data, f, indent=2, ensure_ascii=False)
-
-    def load(self) -> bool:
-        if self.path.exists():
-            with open(self.path, 'r', encoding='utf-8') as f:
-                self.data = json.load(f)
-            return True
-        return False
-
-
-def find_contact_in_cache(email: str, empresa: str, cache: List[dict]) -> Optional[dict]:
-    """Busca contacto exacto en cache por email + empresa."""
-    for c in cache:
-        if c.get('email', '').lower() == email.lower() and c.get('empresa', '') == empresa:
-            return c
-    return None
-
-
-def merge_enrichment(existing: dict, enrichment: dict) -> dict:
-    """Mezcla enrichment en existing - solo llena vacíos."""
-    result = existing.copy()
-    for key in ['telefono', 'departamento', 'oficina', 'direccion']:
-        if not result.get(key) and enrichment.get(key):
-            result[key] = enrichment.get(key)
-    return result
-
-
 def enrich_excel_by_companies(
     excel_path: Path,
     companies: List[str],
-    cache: List[dict],
     session_file: str = "state.json",
-    progress_path: Optional[Path] = None,
     progress_callback: Optional[Callable[[int, int], None]] = None,
 ) -> Dict[str, Any]:
     """Enriquece Excel selectivamente por lista de compañías usando GetPersona API.
@@ -134,14 +96,11 @@ def enrich_excel_by_companies(
     1. Lee Sheet2 -> filtra por companies con X
     2. Para cada compañía:
        a. Busca en Sheet1 filas donde Empresa == compañía
-       b. Para cada match -> busca persona_id en cache (usa cache raw si tiene PersonaId)
-       c. Si tiene persona_id -> llama GetPersona API -> llena vacíos
+       b. Para cada match con persona_id y teléfono vacío -> llama GetPersona API
+       c. Actualiza la misma fila en Sheet1
     3. Guarda Excel actualizado
     """
     companies_set = set(companies)
-    progress = EnrichProgress(progress_path) if progress_path else None
-    if progress and progress.load():
-        companies_set -= set(progress.data.get('companies_done', []))
 
     try:
         cookie_str = _build_cookie_header(session_file)
@@ -157,65 +116,40 @@ def enrich_excel_by_companies(
     ws1 = wb["Contactos"]
     ws2 = wb["Compañías"]
 
-    cache_index: Dict[tuple, dict] = {}
-    for c in cache:
-        email_obj = c.get('EmailAddress') or c.get('email', {})
-        if isinstance(email_obj, dict):
-            email = email_obj.get('EmailAddress', '').lower()
-        elif isinstance(email_obj, str):
-            email = email_obj.lower()
-        else:
-            email = ''
-
-        empresa = c.get('CompanyName') or c.get('empresa', '')
-        key = (email, empresa)
-        cache_index[key] = c
-
     headers = [cell.value for cell in ws1[1]]
+    persona_id_idx = headers.index('persona_id') + 1
     telefono_idx = headers.index('telefono') + 1
     depto_idx = headers.index('departamento') + 1
     oficina_idx = headers.index('oficina') + 1
     direccion_idx = headers.index('direccion') + 1
     empresa_idx = headers.index('empresa') + 1
-    email_idx = headers.index('email') + 1
+
+    empresa_to_rows: Dict[str, List[int]] = {}
+    for row_idx in range(2, ws1.max_row + 1):
+        empresa = ws1.cell(row_idx, empresa_idx).value
+        if empresa:
+            empresa_to_rows.setdefault(str(empresa), []).append(row_idx)
 
     total_enriched = 0
     companies_done: List[str] = []
-    errors = []
+    errors: List[str] = []
 
-    for row_idx in range(2, ws2.max_row + 1):
-        company = ws2.cell(row_idx, 1).value
-        enrich_mark = ws2.cell(row_idx, 2).value
-
-        enrich_str = str(enrich_mark).strip().upper() if enrich_mark else ''
-        if not company or enrich_str != 'X':
-            continue
+    for company in companies:
         if company not in companies_set:
             continue
 
-        for data_row_idx in range(2, ws1.max_row + 1):
-            empresa_cell = ws1.cell(data_row_idx, empresa_idx).value
-            if empresa_cell != company:
+        row_indices = empresa_to_rows.get(company, [])
+        for row_idx in row_indices:
+            persona_id = ws1.cell(row_idx, persona_id_idx).value
+            if not persona_id:
                 continue
 
-            email_cell = ws1.cell(data_row_idx, email_idx).value
-            cache_key = (str(email_cell).lower() if email_cell else '', company)
-            cached = cache_index.get(cache_key)
-
-            if not cached:
-                continue
-
-            persona_id = cached.get('persona_id', '')
-            if not persona_id:
-                persona_id_obj = cached.get('PersonaId') or {}
-                if isinstance(persona_id_obj, dict):
-                    persona_id = persona_id_obj.get('Id', '')
-
-            if not persona_id:
+            telefono_actual = ws1.cell(row_idx, telefono_idx).value
+            if telefono_actual:
                 continue
 
             try:
-                enriched = _call_get_persona(persona_id, cookie_str, canary)
+                enriched = _call_get_persona(str(persona_id), cookie_str, canary)
             except Exception as e:
                 errors.append(str(e))
                 continue
@@ -223,35 +157,22 @@ def enrich_excel_by_companies(
             if not enriched:
                 continue
 
-            telefono = ws1.cell(data_row_idx, telefono_idx).value
-            if not telefono and enriched.get('telefono'):
-                ws1.cell(data_row_idx, telefono_idx).value = enriched['telefono']
-
-            depto = ws1.cell(data_row_idx, depto_idx).value
-            if not depto and enriched.get('departamento'):
-                ws1.cell(data_row_idx, depto_idx).value = enriched['departamento']
-
-            oficina = ws1.cell(data_row_idx, oficina_idx).value
-            if not oficina and enriched.get('oficina'):
-                ws1.cell(data_row_idx, oficina_idx).value = enriched['oficina']
-
-            direccion = ws1.cell(data_row_idx, direccion_idx).value
-            if not direccion and enriched.get('direccion'):
-                ws1.cell(data_row_idx, direccion_idx).value = enriched['direccion']
+            if enriched.get('telefono'):
+                ws1.cell(row_idx, telefono_idx).value = enriched['telefono']
+            if enriched.get('departamento'):
+                ws1.cell(row_idx, depto_idx).value = enriched['departamento']
+            if enriched.get('oficina'):
+                ws1.cell(row_idx, oficina_idx).value = enriched['oficina']
+            if enriched.get('direccion'):
+                ws1.cell(row_idx, direccion_idx).value = enriched['direccion']
 
             total_enriched += 1
-
             if progress_callback:
                 progress_callback(total_enriched, 0)
 
             time.sleep(0.5)
 
         companies_done.append(company)
-
-        if progress:
-            progress.data['companies_done'] = companies_done
-            progress.data['contacts_enriched'] = total_enriched
-            progress.save()
 
     wb.save(excel_path)
 
@@ -275,5 +196,5 @@ def get_companies_to_enrich_from_excel(excel_path: Path) -> List[str]:
         enrich_mark = ws2.cell(row_idx, 2).value
         enrich_str = str(enrich_mark).strip().upper() if enrich_mark else ''
         if company and enrich_str == 'X':
-            companies.append(company)
+            companies.append(str(company))
     return companies
