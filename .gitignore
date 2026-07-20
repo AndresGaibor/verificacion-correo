@@ -9,6 +9,9 @@ state.json
 config.yaml
 config/
 
+# Archivos de datos (nunca versionar)
+data/
+
 # Archivos de datos sensibles (correos, contactos, scraping)
 *.csv
 *.xlsx

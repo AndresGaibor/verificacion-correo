@@ -198,13 +198,14 @@ class GUIService:
         def enrich_thread():
             try:
                 from verificacion_correo.core.gal_enricher import enrich_excel_by_companies, get_companies_to_enrich_from_excel
-                from verificacion_correo.core.gal_exporter import load_gal_cache
+                from verificacion_correo.core.gal_exporter import load_raw_gal_cache
                 from pathlib import Path
 
                 excel_p = Path(excel_path)
                 cache_p = Path(cache_path)
+                output_dir = cache_p.parent
 
-                cache = load_gal_cache(cache_p)
+                cache = load_raw_gal_cache(output_dir)
                 companies = get_companies_to_enrich_from_excel(excel_p)
 
                 if not companies:

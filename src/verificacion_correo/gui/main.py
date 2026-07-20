@@ -548,7 +548,7 @@ class VerificacionCorreosGUI:
 
         self.scraper_start_btn = ttk.Button(
             button_frame,
-            text="▶️ Extraer GAL",
+            text="▶️ Extraer Directorio",
             command=self._start_scraper,
             style='Accent.TButton'
         )
@@ -566,11 +566,11 @@ class VerificacionCorreosGUI:
 
         self.enrich_btn = ttk.Button(
             button_frame,
-            text="🔄 Enriquecer",
+            text="🔄 Completar información",
             command=self._start_enrichment
         )
         self.enrich_btn.pack(side='left', padx=(5, 0))
-        ToolTip(self.enrich_btn, "Enriquece contactos de compañías marcadas con X usando cache local")
+        ToolTip(self.enrich_btn, "Busca teléfono, departamento y dirección de contactos usando GetPersona API")
 
         btn_abrir_resultados = ttk.Button(
             button_frame,
@@ -1149,8 +1149,30 @@ class VerificacionCorreosGUI:
             messagebox.showwarning("Error", "No se encontró cache.json. Ejecuta extracción primero.")
             return
 
-        self._add_scraper_log("🔄 Iniciando enrichment...")
-        self._update_scraper_status("🔄 Enriquciendo...", "#3498db")
+        from openpyxl import load_workbook
+        wb = load_workbook(excel_path)
+        ws2 = wb["Compañías"]
+        companies_selected = False
+        for row in range(2, ws2.max_row + 1):
+            enrich = ws2.cell(row, 2).value
+            if enrich and str(enrich).strip().upper() == 'X':
+                companies_selected = True
+                break
+
+        if not companies_selected:
+            messagebox.showinfo(
+                "Sin selección",
+                "Para completar información:\n\n"
+                "1. Ve a la hoja 'Compañías' (segunda pestaña)\n"
+                "2. Busca la empresa que quieres enriquecer\n"
+                "3. Escribe 'X' en la columna 'Enrich'\n"
+                "4. Guarda el archivo\n"
+                "5. Vuelve a presionar 'Completar información'"
+            )
+            return
+
+        self._add_scraper_log("🔄 Iniciando Completar información...")
+        self._update_scraper_status("🔄 Completando...", "#3498db")
 
         try:
             self.service.start_enrichment(str(excel_path), str(cache_path))
@@ -1730,11 +1752,11 @@ Resultados guardados en: {self.excel_path_var.get()}"""
         contacts = data.get('contacts_enriched', 0)
         companies = data.get('companies_done', 0)
 
-        self._update_scraper_status("✅ Enrichment completo", "#27ae60")
-        self._add_scraper_log(f"✅ Enrichment: {contacts} contactos enriquecidos de {companies} compañías")
+        self._update_scraper_status("✅ Completado", "#27ae60")
+        self._add_scraper_log(f"✅ Completado: {contacts} contactos de {companies} compañías")
         messagebox.showinfo(
-            "Enrichment Completo",
-            f"Se.enriquecieron {contacts} contactos de {companies} compañías.\n\n"
+            "Completado",
+            f"Se completaron {contacts} contactos de {companies} compañías.\n\n"
             f"Revisa el Excel para ver los datos."
         )
 

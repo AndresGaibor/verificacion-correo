@@ -95,7 +95,7 @@ class TestSaveToExcel:
         wb = load_workbook(excel_path)
         ws1 = wb["Contactos"]
         headers = [cell.value for cell in ws1[1]]
-        assert headers == ['nombre', 'email', 'empresa', 'telefono', 'departamento', 'oficina', 'direccion']
+        assert headers == ['nombre', 'email', 'empresa', 'telefono', 'departamento', 'oficina', 'direccion', 'persona_id']
 
     def test_save_to_excel_companias_sheet(self, tmp_path):
         contacts = [

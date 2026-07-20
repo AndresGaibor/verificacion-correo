@@ -5,7 +5,7 @@ from typing import List, Dict, Any, Optional
 import json
 from openpyxl import Workbook
 
-CONTACT_FIELDS = ['nombre', 'email', 'empresa', 'telefono', 'departamento', 'oficina', 'direccion']
+CONTACT_FIELDS = ['nombre', 'email', 'empresa', 'telefono', 'departamento', 'oficina', 'direccion', 'persona_id']
 
 
 def flatten_contact_to_dict(persona: dict) -> dict:
@@ -55,6 +55,11 @@ def flatten_contact_to_dict(persona: dict) -> dict:
         elif isinstance(val, str):
             address = val
 
+    persona_id = ""
+    persona_id_obj = persona.get("PersonaId") or {}
+    if isinstance(persona_id_obj, dict):
+        persona_id = persona_id_obj.get("Id") or ""
+
     return {
         'nombre': name,
         'email': email,
@@ -63,6 +68,7 @@ def flatten_contact_to_dict(persona: dict) -> dict:
         'departamento': department,
         'oficina': office,
         'direccion': address,
+        'persona_id': persona_id,
     }
 
 
@@ -124,6 +130,15 @@ def save_to_excel(contacts: List[dict], output_path: Path, cache_path: Optional[
 
 
 def load_gal_cache(cache_path: Path) -> List[dict]:
-    """Carga GAL cache desde JSON."""
+    """Carga GAL cache desde JSON (flattened version with persona_id)."""
     with open(cache_path, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+
+def load_raw_gal_cache(output_dir: Path) -> List[dict]:
+    """Carga GAL cache raw desde directorio_completo.json (con PersonaId)."""
+    raw_path = output_dir / "directorio_completo.json"
+    if not raw_path.exists():
+        return []
+    with open(raw_path, 'r', encoding='utf-8') as f:
         return json.load(f)
