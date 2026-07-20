@@ -136,8 +136,8 @@ class GUIService:
         max_contacts: int = 0,
         force_restart: bool = False,
         company_filter: Optional[list] = None,
-        enrich_contacts: bool = False,
         address_list_id: Optional[str] = None,
+        output_excel: Optional[str] = None,
     ) -> None:
         """Start GAL directory scraping in background thread."""
         if self.is_processing:
@@ -169,8 +169,8 @@ class GUIService:
                     session_health_callback=session_health_callback,
                     stop_flag=stop_flag,
                     company_filter=company_filter,
-                    enrich_contacts=enrich_contacts,
                     address_list_id=address_list_id or "fed75805-8ba2-4323-9f6d-80be7e3abc6a",
+                    output_excel=output_excel,
                 )
                 self.progress_queue.put(('gal_complete', result))
             except Exception as e:
@@ -186,6 +186,62 @@ class GUIService:
         """Signal the GAL scraper to stop."""
         if hasattr(self, '_gal_stop_flag'):
             self._gal_stop_flag['stop'] = True
+
+    def start_enrichment(self, excel_path: str, cache_path: str) -> None:
+        """Start enrichment in background thread."""
+        if self.is_processing:
+            raise RuntimeError("Processing already active")
+
+        self.should_stop = False
+        self.is_processing = True
+
+        def enrich_thread():
+            try:
+                from verificacion_correo.core.gal_enricher import enrich_excel_by_companies, get_companies_to_enrich_from_excel
+                from verificacion_correo.core.gal_exporter import load_gal_cache
+                from pathlib import Path
+
+                excel_p = Path(excel_path)
+                cache_p = Path(cache_path)
+
+                cache = load_gal_cache(cache_p)
+                companies = get_companies_to_enrich_from_excel(excel_p)
+
+                if not companies:
+                    self.progress_queue.put(('enrich_complete', {
+                        'error': 'No companies selected for enrichment',
+                        'contacts_enriched': 0,
+                        'companies_done': 0
+                    }))
+                    self.is_processing = False
+                    return
+
+                logger.info(f"Starting enrichment for {len(companies)} companies")
+
+                progress_path = excel_p.parent / "enrich_progress.json"
+
+                def progress_callback(enriched_count, total):
+                    self.progress_queue.put(('enrich_progress', {
+                        'count': enriched_count,
+                        'companies': len(companies)
+                    }))
+
+                result = enrich_excel_by_companies(
+                    excel_p,
+                    companies,
+                    cache,
+                    progress_path=progress_path,
+                    progress_callback=progress_callback,
+                )
+                self.progress_queue.put(('enrich_complete', result))
+            except Exception as e:
+                logger.error(f"Enrichment error: {e}")
+                self.progress_queue.put(('enrich_error', str(e)))
+            finally:
+                self.is_processing = False
+
+        self.current_thread = threading.Thread(target=enrich_thread, daemon=True)
+        self.current_thread.start()
 
     def start_company_scan(self, address_list_id: Optional[str] = None) -> None:
         """Start company list scan from GAL in background thread."""

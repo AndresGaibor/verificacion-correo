@@ -59,6 +59,16 @@ class CompanyFilterConfig:
 
 
 @dataclass
+class AuthConfig:
+    """Authentication credentials for ADFS login."""
+    username: Optional[str] = None
+    password: Optional[str] = None
+
+    def has_credentials(self) -> bool:
+        return bool(self.username and self.password)
+
+
+@dataclass
 class Selectors:
     """CSS selectors for OWA interface elements."""
     new_message_btn: str = 'button[title="Escribir un mensaje nuevo (N)"]'
@@ -274,6 +284,18 @@ class Config:
         company_filter_data = self._config_data.get('company_filter', {})
         self.company_filter = CompanyFilterConfig(**company_filter_data)
 
+        # Auth credentials - from env vars first, then YAML
+        env_username = os.environ.get('ADFS_USERNAME', '')
+        env_password = os.environ.get('ADFS_PASSWORD', '')
+        yaml_auth_data = self._config_data.get('auth', {})
+        yaml_username = yaml_auth_data.get('username', '') if yaml_auth_data else ''
+        yaml_password = yaml_auth_data.get('password', '') if yaml_auth_data else ''
+
+        self.auth = AuthConfig(
+            username=env_username or yaml_username or None,
+            password=env_password or yaml_password or None
+        )
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert config to YAML-serializable dict."""
         return {
@@ -312,6 +334,10 @@ class Config:
             'company_filter': {
                 'enabled': self.company_filter.enabled,
                 'companies': self.company_filter.companies or []
+            },
+            'auth': {
+                'username': self.auth.username or '',
+                'password': '***' if self.auth.password else ''
             }
         }
 

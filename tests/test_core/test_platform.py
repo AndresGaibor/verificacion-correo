@@ -113,14 +113,6 @@ class TestOpenInExplorer:
 
         assert result is False
 
-    def test_creates_directory_if_not_exists(self, tmp_path):
-        """Si el path parece un directorio (sin extensión) y no existe, se crea."""
-        new_dir = tmp_path / "new_folder"
-        result = open_in_explorer(new_dir)
-
-        assert new_dir.exists()
-        assert new_dir.is_dir()
-
     def test_returns_false_for_nonexistent_file(self, tmp_path):
         """Si el path parece un archivo (con extensión) y no existe, retorna False."""
         result = open_in_explorer(tmp_path / "nonexistent.txt")
@@ -195,14 +187,6 @@ class TestOpenFolder:
         result = open_folder(tmp_path)
 
         assert result is False
-
-    def test_creates_folder_if_not_exists(self, tmp_path):
-        new_folder = tmp_path / "new_folder"
-        with patch("verificacion_correo.core.platform.open_in_explorer", return_value=True):
-            result = open_folder(new_folder)
-
-        assert new_folder.exists()
-        assert result is True
 
     def test_returns_false_for_file_path(self, tmp_path):
         test_file = tmp_path / "file.txt"

@@ -271,25 +271,16 @@ class VerificacionCorreosGUI:
         self.session_status_text = tk.StringVar(value="Verificando...")
         ttk.Label(status_frame, textvariable=self.session_status_text, wraplength=600).pack()
 
-        # Session actions
+        # Session actions - dynamic button
         action_frame = ttk.Frame(main_frame)
         action_frame.pack(fill='x', pady=(0, 10))
 
-        btn_verificar = ttk.Button(
+        self.session_action_btn = ttk.Button(
             action_frame,
-            text="🔄 Verificar Sesión",
-            command=self._check_session_status
+            text="🔐 Iniciar Sesión",
+            command=self._handle_session_action
         )
-        btn_verificar.pack(side='left', padx=(0, 5))
-        ToolTip(btn_verificar, "Verifica el estado actual de la sesión OWA")
-
-        btn_configurar = ttk.Button(
-            action_frame,
-            text="🔧 Configurar Sesión",
-            command=self._setup_session
-        )
-        btn_configurar.pack(side='left', padx=5)
-        ToolTip(btn_configurar, "Abre navegador para iniciar sesión en OWA")
+        self.session_action_btn.pack(side='left', padx=(0, 5))
 
         btn_eliminar = ttk.Button(
             action_frame,
@@ -297,7 +288,6 @@ class VerificacionCorreosGUI:
             command=self._delete_session
         )
         btn_eliminar.pack(side='left', padx=(5, 0))
-        ToolTip(btn_eliminar, "Elimina la sesión guardada (requiere re-autenticación)")
 
         # Session info
         info_frame = ttk.LabelFrame(main_frame, text="Información de la Sesión", padding=10)
@@ -416,10 +406,10 @@ class VerificacionCorreosGUI:
         ).pack(anchor='w')
 
         # Address list selection
-        addr_frame = ttk.LabelFrame(config_frame, text="Lista de Direcciones (Address List)", padding=5)
-        addr_frame.pack(fill='x', pady=(5, 0))
+        self.addr_frame = ttk.LabelFrame(config_frame, text="Lista de Direcciones (Address List)", padding=5)
+        self.addr_frame.pack(fill='x', pady=(5, 0))
 
-        addr_controls = ttk.Frame(addr_frame)
+        addr_controls = ttk.Frame(self.addr_frame)
         addr_controls.pack(fill='x')
 
         self.address_list_combo = ttk.Combobox(
@@ -438,7 +428,7 @@ class VerificacionCorreosGUI:
         self.addr_list_scan_btn.pack(side='left')
 
         self.addr_list_status_label = ttk.Label(
-            addr_frame,
+            self.addr_frame,
             text="Use 'Cargar listas' para descubrir las listas de direcciones disponibles en OWA",
             foreground='gray',
             font=('TkDefaultFont', 9, 'italic'),
@@ -446,22 +436,26 @@ class VerificacionCorreosGUI:
         self.addr_list_status_label.pack(anchor='w', pady=(3, 0))
 
         # Company filter section
-        filter_frame = ttk.LabelFrame(main_frame, text="Filtro de Compañías", padding=10)
-        filter_frame.pack(fill='x', pady=(0, 10))
+        self.filter_frame = ttk.LabelFrame(main_frame, text="Filtro de Compañías", padding=10)
+        self.filter_frame.pack(fill='x', pady=(0, 10))
+        self.filter_frame.pack_forget()  # Hidden: feature not working
+
+        # Address list also hidden
+        self.addr_frame.pack_forget()  # Hidden: feature not working
 
         # Enable/disable filter
         self.company_filter_enabled = tk.BooleanVar(
             value=self.config.company_filter.enabled if hasattr(self.config, 'company_filter') else False
         )
         ttk.Checkbutton(
-            filter_frame,
+            self.filter_frame,
             text="Filtrar por compañía (solo guardar contactos de las compañías seleccionadas)",
             variable=self.company_filter_enabled,
             command=self._on_company_filter_toggle
         ).pack(anchor='w', pady=(0, 5))
 
         # Company filter controls
-        filter_controls = ttk.Frame(filter_frame)
+        filter_controls = ttk.Frame(self.filter_frame)
         filter_controls.pack(fill='x', pady=(0, 5))
 
         self.company_scan_btn = ttk.Button(
@@ -515,7 +509,7 @@ class VerificacionCorreosGUI:
         ).pack(side='left')
 
         # Company list with scrollbar
-        list_frame = ttk.Frame(filter_frame)
+        list_frame = ttk.Frame(self.filter_frame)
         list_frame.pack(fill='x')
 
         self.company_list_canvas = tk.Canvas(list_frame, height=120, highlightthickness=0)
@@ -538,7 +532,7 @@ class VerificacionCorreosGUI:
 
         # Company status label
         self.company_status_label = ttk.Label(
-            filter_frame,
+            self.filter_frame,
             text="No hay compañías cargadas",
             foreground='gray',
             font=('TkDefaultFont', 9, 'italic')
@@ -549,25 +543,17 @@ class VerificacionCorreosGUI:
         control_frame = ttk.LabelFrame(main_frame, text="Control de Extracción", padding=10)
         control_frame.pack(fill='x', pady=(0, 10))
 
-        # Enrichment option
-        self.enrich_contacts_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(
-            control_frame,
-            text=" Enriquecer contactos (obtener teléfono, departamento, dirección, oficina — más lento)",
-            variable=self.enrich_contacts_var
-        ).pack(anchor='w', pady=(0, 5))
-
         button_frame = ttk.Frame(control_frame)
         button_frame.pack(fill='x')
 
         self.scraper_start_btn = ttk.Button(
             button_frame,
-            text="▶️ Iniciar Extracción",
+            text="▶️ Extraer GAL",
             command=self._start_scraper,
             style='Accent.TButton'
         )
         self.scraper_start_btn.pack(side='left', padx=(0, 5), fill='x', expand=True)
-        ToolTip(self.scraper_start_btn, "Inicia la extracción del directorio GAL (Ctrl+Shift+Enter)")
+        ToolTip(self.scraper_start_btn, "Extrae directorio GAL completo a Excel (Ctrl+Shift+Enter)")
 
         self.scraper_stop_btn = ttk.Button(
             button_frame,
@@ -578,13 +564,21 @@ class VerificacionCorreosGUI:
         self.scraper_stop_btn.pack(side='left', fill='x', expand=True)
         ToolTip(self.scraper_stop_btn, "Detiene la extracción en curso (Escape)")
 
+        self.enrich_btn = ttk.Button(
+            button_frame,
+            text="🔄 Enriquecer",
+            command=self._start_enrichment
+        )
+        self.enrich_btn.pack(side='left', padx=(5, 0))
+        ToolTip(self.enrich_btn, "Enriquece contactos de compañías marcadas con X usando cache local")
+
         btn_abrir_resultados = ttk.Button(
             button_frame,
-            text="📂 Abrir resultados",
+            text="📂 Abrir",
             command=self._open_scraper_output
         )
         btn_abrir_resultados.pack(side='left', padx=(5, 0))
-        ToolTip(btn_abrir_resultados, "Abre la carpeta con los resultados de extracción")
+        ToolTip(btn_abrir_resultados, "Abre carpeta de resultados")
 
         # Progress section
         progress_frame = ttk.LabelFrame(main_frame, text="Progreso de Extracción", padding=10)
@@ -1078,6 +1072,7 @@ class VerificacionCorreosGUI:
 
         # Confirm if resuming
         output_dir = Path(self.scraper_output_dir.get()) / "gal"
+        excel_path = output_dir / "gal_export.xlsx"
         progress_file = output_dir / "gal_progress.json"
         if progress_file.exists():
             with open(progress_file) as f:
@@ -1119,8 +1114,8 @@ class VerificacionCorreosGUI:
                 max_contacts=max_contacts,
                 force_restart=force_restart,
                 company_filter=company_filter,
-                enrich_contacts=self.enrich_contacts_var.get(),
                 address_list_id=self.selected_address_list_id.get(),
+                output_excel=str(excel_path),
             )
         except Exception as e:
             self._add_scraper_log(f"❌ Error al iniciar: {e}")
@@ -1140,6 +1135,31 @@ class VerificacionCorreosGUI:
         self._update_scraper_status("⏸️ Deteniendo...", "#e67e22")
         self.service.stop_gal_scraping()
         self.scraper_stop_btn.config(state='disabled')
+
+    def _start_enrichment(self):
+        """Start enrichment of contacts from cache."""
+        excel_path = Path(self.scraper_output_dir.get()) / "gal" / "gal_export.xlsx"
+        cache_path = Path(self.scraper_output_dir.get()) / "gal" / "cache.json"
+
+        if not excel_path.exists():
+            messagebox.showwarning("Error", "Primero ejecuta Extracción GAL")
+            return
+
+        if not cache_path.exists():
+            messagebox.showwarning("Error", "No se encontró cache.json. Ejecuta extracción primero.")
+            return
+
+        self._add_scraper_log("🔄 Iniciando enrichment...")
+        self._update_scraper_status("🔄 Enriquciendo...", "#3498db")
+
+        try:
+            self.service.start_enrichment(str(excel_path), str(cache_path))
+            self.scraper_start_btn.config(state='disabled')
+            self.enrich_btn.config(state='disabled')
+            self.scraper_active = True
+        except Exception as e:
+            self._add_scraper_log(f"❌ Error al iniciar enrichment: {e}")
+            messagebox.showerror("Error", f"Error al iniciar enrichment: {e}")
 
     def _create_config_editor(self, parent):
         """Create configuration editor interface."""
@@ -1325,6 +1345,12 @@ class VerificacionCorreosGUI:
                 self._update_session_health(data)
             elif item_type == 'progress':
                 self._update_progress(data)
+            elif item_type == 'enrich_progress':
+                self._update_enrich_progress(data)
+            elif item_type == 'enrich_complete':
+                self._handle_enrich_complete(data)
+            elif item_type == 'enrich_error':
+                self._handle_enrich_error(data)
 
         if not self.service.is_processing:
             self.progress_bar.stop()
@@ -1681,6 +1707,47 @@ Resultados guardados en: {self.excel_path_var.get()}"""
         self._add_scraper_log(f"❌ Error: {error_msg}")
         messagebox.showerror("Error de Extracción", f"Ocurrió un error:\n{error_msg}")
 
+    def _update_enrich_progress(self, data):
+        """Update enrichment progress."""
+        count = data.get('count', 0)
+        companies = data.get('companies', 0)
+        self._update_scraper_status(f"🔄 Enriquciendo: {count} contactos", "#3498db")
+
+    def _handle_enrich_complete(self, data):
+        """Handle enrichment completion."""
+        self.scraper_start_btn.config(state="normal")
+        self.enrich_btn.config(state="normal")
+        self.scraper_stop_btn.config(state="disabled")
+        self.scraper_active = False
+
+        error = data.get('error')
+        if error:
+            self._update_scraper_status("⚠️ Sin compañías", "#e67e22")
+            self._add_scraper_log(f"⚠️ {error}")
+            messagebox.showwarning("Enrichment", error)
+            return
+
+        contacts = data.get('contacts_enriched', 0)
+        companies = data.get('companies_done', 0)
+
+        self._update_scraper_status("✅ Enrichment completo", "#27ae60")
+        self._add_scraper_log(f"✅ Enrichment: {contacts} contactos enriquecidos de {companies} compañías")
+        messagebox.showinfo(
+            "Enrichment Completo",
+            f"Se.enriquecieron {contacts} contactos de {companies} compañías.\n\n"
+            f"Revisa el Excel para ver los datos."
+        )
+
+    def _handle_enrich_error(self, error_msg):
+        """Handle enrichment error."""
+        self.scraper_start_btn.config(state="normal")
+        self.enrich_btn.config(state="normal")
+        self.scraper_stop_btn.config(state="disabled")
+        self.scraper_active = False
+        self._update_scraper_status("❌ Error enrichment", "#e74c3c")
+        self._add_scraper_log(f"❌ Error enrichment: {error_msg}")
+        messagebox.showerror("Error de Enrichment", f"Ocurrió un error:\n{error_msg}")
+
     MAX_LOG_MESSAGES = 1000
 
     def _add_log(self, message):
@@ -1716,7 +1783,7 @@ Resultados guardados en: {self.excel_path_var.get()}"""
                 messagebox.showerror("Error", f"Error al guardar log: {e}")
 
     def _check_session_status(self):
-        """Check and display session status."""
+        """Check and display session status with real API validation."""
         try:
             session_file = Path(self.config.get_session_file_path())
             session_type = "Playwright (Chromium)"
@@ -1725,31 +1792,56 @@ Resultados guardados en: {self.excel_path_var.get()}"""
             status_text += f"Archivo: {session_file}\n"
             status_text += f"Existe: {'Sí' if session_file.exists() else 'No'}\n"
 
+            is_valid = False
+
             if session_file.exists():
                 try:
                     with open(session_file, 'r') as f:
                         session_data = json.load(f)
                     cookies_count = len(session_data.get('cookies', []))
-                    status_text += f"Válida: Sí\n"
-                    status_text += f"Cookies: {cookies_count}\n"
 
-                    if 'origins' in session_data:
-                        status_text += f"Orígenes: {len(session_data.get('origins', []))}"
-                except (json.JSONDecodeError, KeyError):
-                    status_text += f"Válida: Error al leer"
+                    # Validate session via API
+                    api_result = self.service.validate_session_api_quick()
+                    is_valid = api_result.get('valid', False)
+                    health = api_result.get('health', 'unknown')
+                    message = api_result.get('message', '')
+
+                    if is_valid:
+                        status_text += f"✅ Sesión válida (salud: {health})\n"
+                        status_text += f"Cookies: {cookies_count}\n"
+                        if message:
+                            status_text += f"Info: {message}"
+                    else:
+                        status_text += f"❌ Sesión inválida\n"
+                        status_text += f"Cookies: {cookies_count}\n"
+                        if message:
+                            status_text += f"Razón: {message}"
+                        else:
+                            status_text += f"\n⚠️ La sesión ha expirado o es inválida\n"
+                            status_text += f"Haz clic en 'Iniciar Sesión' para autenticarte"
+
+                except (json.JSONDecodeError, KeyError) as e:
+                    status_text += f"❌ Error al leer sesión: {e}"
             else:
-                status_text += f"Válida: No\n"
+                status_text += f"❌ No existe sesión\n"
                 status_text += f"\n⚠️ Sesión no encontrada\n"
-                status_text += f"Usa 'Configurar Sesión' para crear una"
+                status_text += f"Haz clic en 'Iniciar Sesión' para crear una"
 
             self.session_status_text.set(status_text)
 
             # Update session indicator in status bar
-            session_file = Path(self.config.get_session_file_path())
-            if session_file.exists():
+            if session_file.exists() and is_valid:
                 self.session_indicator.config(text="🟢 Sesión OK", foreground='#27ae60')
             else:
                 self.session_indicator.config(text="🔴 Sin sesión", foreground='#e74c3c')
+
+            # Update action button based on session validity
+            if is_valid:
+                self.session_action_btn.config(text="🔄 Verificar Sesión")
+                ToolTip(self.session_action_btn, "Verifica que la sesión sigue siendo válida")
+            else:
+                self.session_action_btn.config(text="🔐 Iniciar Sesión")
+                ToolTip(self.session_action_btn, "Abre navegador para iniciar sesión en OWA")
 
             # Update session info text
             self.session_info_text.config(state='normal')
@@ -1795,6 +1887,22 @@ Resultados guardados en: {self.excel_path_var.get()}"""
             text = f"{icon} API: ?/?"
 
         self.session_health_indicator.config(text=text, foreground=color)
+
+    def _handle_session_action(self):
+        """Handle the dynamic session action button click."""
+        session_file = Path(self.config.get_session_file_path())
+        if session_file.exists():
+            # Check if session is valid
+            api_result = self.service.validate_session_api_quick()
+            if api_result.get('valid'):
+                # Session is valid - just verify and show status
+                self._check_session_status()
+            else:
+                # Session exists but is invalid - need to setup new session
+                self._setup_session()
+        else:
+            # No session exists - setup new session
+            self._setup_session()
 
     def _setup_session(self):
         """Set up browser session."""

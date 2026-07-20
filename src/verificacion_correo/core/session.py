@@ -107,28 +107,55 @@ class SessionManager:
                 # Navigate to OWA
                 page.goto(self.config.page_url)
 
-                logger.info("Browser opened. Please log in manually.")
-                logger.info("The browser will stay open for 5 minutes to allow login...")
-                logger.info("You can close the browser when finished to save the session.")
+                # Try auto-login if credentials are configured
+                if self.config.auth.has_credentials():
+                    logger.info("Credentials found, attempting auto-login...")
+                    self._try_auto_login_adfs(page)
 
-                # Wait for user to complete login or close browser
-                # We'll wait up to 5 minutes (300 seconds)
-                try:
-                    page.wait_for_timeout(300000)  # 5 minutes
-                except Exception:
-                    # Browser was closed by user, which is expected
-                    pass
+                logger.info("Waiting for authentication... (timeout: 3 minutes)")
 
-                # Save session state
-                self._ensure_session_directory()
-                context.storage_state(path=str(self.session_file))
+                # Detection loop for successful authentication
+                import time as time_module
+                start_time = time_module.time()
+                TIMEOUT = 180  # 3 minutes
+                CHECK_INTERVAL = 2  # seconds
+                auth_success = False
 
-                logger.info(f"Session saved to: {self.session_file}")
+                while True:
+                    # Check if browser was closed by user
+                    try:
+                        if page.is_closed():
+                            logger.info("Browser closed by user")
+                            break
+                    except Exception:
+                        # Page might be in a bad state
+                        break
+
+                    current_url = page.url.lower()
+
+                    # Success: OWA page reached
+                    if 'correoweb.madrid.org/owa/' in current_url:
+                        logger.info("Authentication successful!")
+                        auth_success = True
+                        break
+
+                    # Check timeout
+                    if time_module.time() - start_time >= TIMEOUT:
+                        logger.warning("Authentication timeout (3 minutes)")
+                        break
+
+                    time_module.sleep(CHECK_INTERVAL)
+
+                # Save session state only if authentication was successful
+                if auth_success:
+                    self._ensure_session_directory()
+                    context.storage_state(path=str(self.session_file))
+                    logger.info(f"Session saved to: {self.session_file}")
 
                 context.close()
                 browser.close()
 
-            return True
+            return auth_success
 
         except Exception as e:
             logger.error(f"Error setting up interactive session: {e}")
@@ -408,6 +435,43 @@ class SessionManager:
     def _ensure_session_directory(self):
         """Ensure the directory for the session file exists."""
         self.session_file.parent.mkdir(parents=True, exist_ok=True)
+
+    def _try_auto_login_adfs(self, page) -> bool:
+        """
+        Try to auto-fill ADFS login form and submit if credentials are available.
+
+        Args:
+            page: Playwright page object
+
+        Returns:
+            True if form was filled and submitted, False otherwise
+        """
+        try:
+            # Wait for the login form to be visible
+            page.wait_for_selector('#loginForm', timeout=10000)
+        except Exception:
+            logger.debug("Login form not found, will wait for manual login")
+            return False
+
+        try:
+            # Fill username
+            page.fill('#userNameInput', self.config.auth.username)
+            logger.debug(f"Filled username: {self.config.auth.username}")
+
+            # Fill password
+            page.fill('#passwordInput', self.config.auth.password)
+            logger.debug("Filled password")
+
+            # Click submit button
+            page.click('#submitButton')
+            logger.info("Clicked 'Iniciar sesión' button")
+            logger.info("Please enter MFA code if prompted...")
+
+            return True
+
+        except Exception as e:
+            logger.warning(f"Auto-login failed: {e}")
+            return False
 
     def _cleanup(self):
         """Clean up browser resources."""

@@ -344,6 +344,7 @@ def scrape_gal(
     stop_flag: Optional[dict] = None,
     company_filter: Optional[List[str]] = None,
     enrich_contacts: bool = False,
+    output_excel: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Scrape contacts from the GAL using paginated FindPeople.
 
@@ -673,6 +674,20 @@ def scrape_gal(
     save_to_json(all_people, json_path)
     save_to_csv(flattened, csv_path)
 
+    # Export to Excel if requested
+    excel_path_str = None
+    if output_excel:
+        try:
+            from .gal_exporter import flatten_contact_to_dict, save_to_excel
+            excel_path = Path(output_excel)
+            excel_flat = [flatten_contact_to_dict(p) for p in all_people]
+            cache_path = output_path / "cache.json"
+            save_to_excel(excel_flat, excel_path, cache_path)
+            excel_path_str = str(excel_path)
+            logger.info(f"Excel exported: {excel_path}")
+        except Exception as e:
+            logger.error(f"Failed to export Excel: {e}")
+
     duration = time.time() - start
     stats = {
         "total": len(all_people),
@@ -688,6 +703,9 @@ def scrape_gal(
         "duration": duration,
         "api_calls": api_calls,
     }
+
+    if excel_path_str:
+        stats["files"]["excel"] = excel_path_str
 
     if company_filter:
         stats["filtered_companies"] = company_filter
