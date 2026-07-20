@@ -1620,6 +1620,7 @@ Duración: {duration:.1f} segundos"""
 
             messagebox.showwarning("Sesión Expirada", message)
             self._add_log(f"⚠️ API search: sesión expirada tras {total} consultas ({success} encontrados, {not_found} no encontrados)")
+            self.notebook.select(2)
         else:
             self.progress_text.set("Búsqueda API completada")
             self.status_label.config(text="Completado")
@@ -1696,6 +1697,7 @@ Resultados guardados en: {self.excel_path_var.get()}"""
                 f"3. Inicie la extracción nuevamente (se reanudará)\n\n"
                 f"📁 {files.get('json', '')}"
             )
+            self.notebook.select(2)
         elif stopped:
             self._update_scraper_status("⏹️ Detenido", "#e67e22")
             self._add_scraper_log(f"⏹️ Scraper detenido ({total} contactos)")
