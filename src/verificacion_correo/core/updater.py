@@ -1,16 +1,13 @@
 import subprocess
 import hashlib
 import sys
-import fcntl
 import os
 from pathlib import Path
 from typing import Optional, Tuple
-import shutil
 
 from .update_models import UpdateStatus, UpdateResult, ERRORES_NO_BLOQUEANTES
 from .app_paths import get_lock_path, get_update_log_path
 
-EXPECTED_REMOTE = "https://github.com/andresgaibor/verificacion-correo.git"
 UPDATE_BRANCH = "main"
 GIT_TIMEOUT = 20
 
@@ -46,12 +43,6 @@ def _get_repo_root(path: Path) -> Optional[Path]:
         return None
     return Path(stdout)
 
-def _get_remote_url(cwd: Path) -> Optional[str]:
-    code, stdout, _ = _run_git(cwd, "remote", "get-url", "origin")
-    if code != 0:
-        return None
-    return stdout
-
 def _is_repo_clean(cwd: Path) -> Tuple[bool, str]:
     code, stdout, _ = _run_git(cwd, "status", "--porcelain")
     if code != 0:
@@ -86,15 +77,6 @@ def check_for_updates(repo_root: Optional[Path] = None) -> UpdateResult:
     if not root:
         _log("WARN No es repositorio Git")
         return UpdateResult(status=UpdateStatus.REPOSITORIO_INVALIDO, message="No es un repositorio Git")
-
-    remote_url = _get_remote_url(root)
-    if not remote_url:
-        _log("WARN Sin remoto configurado")
-        return UpdateResult(status=UpdateStatus.REPOSITORIO_INVALIDO, message="No existe remoto origin")
-
-    if remote_url != EXPECTED_REMOTE:
-        _log(f"WARN Remoto inesperado: {remote_url}")
-        return UpdateResult(status=UpdateStatus.REPOSITORIO_INVALIDO, message=f"Remoto no autorizado: {remote_url}")
 
     code, _, stderr = _run_git(root, "fetch", "origin", UPDATE_BRANCH, "--prune")
     if code != 0:

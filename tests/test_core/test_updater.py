@@ -12,7 +12,6 @@ from verificacion_correo.core.updater import (
     apply_update,
     _is_git_available,
     _get_repo_root,
-    _get_remote_url,
     _is_repo_clean,
     _get_current_commit,
     _get_remote_commit,
@@ -22,7 +21,6 @@ from verificacion_correo.core.updater import (
     _get_lock_pid,
     _is_process_running,
     _get_file_hash,
-    EXPECTED_REMOTE,
     UPDATE_BRANCH,
 )
 from verificacion_correo.core.update_models import UpdateStatus
@@ -43,12 +41,7 @@ def temp_git_repo():
 class TestCheckForUpdates:
     def test_check_updates_no_remote(self, temp_git_repo):
         result = check_for_updates(temp_git_repo)
-        assert result.status == UpdateStatus.REPOSITORIO_INVALIDO
-
-    def test_check_updates_unauthorized_remote(self, temp_git_repo):
-        subprocess.run(["git", "remote", "add", "origin", "https://github.com/wrong/repo.git"], cwd=temp_git_repo, capture_output=True)
-        result = check_for_updates(temp_git_repo)
-        assert result.status == UpdateStatus.REPOSITORIO_INVALIDO
+        assert result.status == UpdateStatus.SIN_INTERNET
 
     def test_check_updates_git_not_available(self):
         with patch("verificacion_correo.core.updater._is_git_available", return_value=False):
@@ -77,12 +70,6 @@ class TestGetRepoRoot:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = _get_repo_root(Path(tmpdir))
             assert root is None
-
-
-class TestGetRemoteUrl:
-    def test_get_remote_url_no_remote(self, temp_git_repo):
-        url = _get_remote_url(temp_git_repo)
-        assert url is None
 
 
 class TestIsRepoClean:

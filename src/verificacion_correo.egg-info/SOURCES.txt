@@ -18,8 +18,11 @@ src/verificacion_correo/core/excel.py
 src/verificacion_correo/core/extractor.py
 src/verificacion_correo/core/first_run.py
 src/verificacion_correo/core/gal_scraper.py
+src/verificacion_correo/core/platform.py
 src/verificacion_correo/core/session.py
 src/verificacion_correo/gui/__init__.py
 src/verificacion_correo/gui/main.py
+src/verificacion_correo/gui/service.py
+src/verificacion_correo/gui/wizard.py
 src/verificacion_correo/utils/__init__.py
 src/verificacion_correo/utils/logging.py

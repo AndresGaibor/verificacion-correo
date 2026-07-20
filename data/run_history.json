@@ -88,5 +88,21 @@
         "progress": "/Users/andresgaibor/code/python/verificacion-correo/data/gal/gal_progress.json"
       }
     }
+  },
+  {
+    "type": "gal",
+    "timestamp": "2026-07-19T19:32:29.916440",
+    "stats": {
+      "total": 500,
+      "duration": 51.58960771560669,
+      "expired": false,
+      "stopped": false,
+      "files": {
+        "json": "/Users/andresgaibor/code/python/verificacion-correo/data/gal/directorio_completo.json",
+        "csv": "/Users/andresgaibor/code/python/verificacion-correo/data/gal/directorio_completo.csv",
+        "progress": "/Users/andresgaibor/code/python/verificacion-correo/data/gal/gal_progress.json",
+        "excel": "/Users/andresgaibor/code/python/verificacion-correo/data/gal/gal_export.xlsx"
+      }
+    }
   }
 ]
