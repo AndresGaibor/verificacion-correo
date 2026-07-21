@@ -85,6 +85,11 @@ class VerificacionCorreosGUI:
         self.scraper_active = False
         self.scraper_log_messages = []
 
+        # Session confirmation dialog state
+        self._session_confirm_window = None
+        self._confirm_status = None
+        self._session_confirm_closing = False
+
         # Address list selection
         self.address_lists = []  # List of {"DisplayName": ..., "FolderId": {"Id": ...}}
         self.selected_address_list_id = tk.StringVar(value="fed75805-8ba2-4323-9f6d-80be7e3abc6a")
@@ -97,6 +102,7 @@ class VerificacionCorreosGUI:
         self._create_widgets()
         self._setup_status_check()
         self._setup_keyboard_shortcuts()
+        self._setup_safe_close()
 
     def _create_widgets(self):
         """Create all GUI widgets."""
@@ -1054,7 +1060,7 @@ class VerificacionCorreosGUI:
         if not Path(session_file).exists():
             messagebox.showwarning(
                 "Sesión Requerida",
-                "No hay sesión guardada.\nUse el comando 'verificacion-correo setup' o el botón 'Configurar Sesión' en la pestaña de Sesión."
+                "No hay sesión guardada.\nUse el botón 'Configurar Sesión' en la pestaña de Sesión."
             )
             return
 
@@ -1725,7 +1731,7 @@ Resultados guardados en: {self.excel_path_var.get()}"""
         """Update enrichment progress."""
         count = data.get('count', 0)
         companies = data.get('companies', 0)
-        self._update_scraper_status(f"🔄 Enriquciendo: {count} contactos", "#3498db")
+        self._update_scraper_status(f"🔄 Enriqueciendo: {count} contactos", "#3498db")
 
     def _handle_enrich_complete(self, data):
         """Handle enrichment completion."""
@@ -1941,41 +1947,145 @@ Resultados guardados en: {self.excel_path_var.get()}"""
 
     def _setup_playwright_session(self):
         """Set up Playwright (Chromium) session."""
+        self._session_confirm_closing = False
+        
         def setup_in_background():
             try:
                 success = self.service.setup_session()
-                if success:
-                    self.root.after(0, lambda: messagebox.showinfo(
-                        "Éxito",
-                        "Sesión de Playwright configurada correctamente.\n\n"
-                        "La sesión ha sido guardada en state.json"
-                    ))
-                else:
-                    self.root.after(0, lambda: messagebox.showerror(
-                        "Error",
-                        "No se pudo configurar la sesión.\n\n"
-                        "Asegúrate de iniciar sesión correctamente antes de guardar."
-                    ))
-
-                self.root.after(0, self._check_session_status)
-
+                
+                # Schedule GUI cleanup on main thread (never access GUI directly)
+                self.root.after(0, lambda: self._cleanup_session_after_setup(success))
+                
             except Exception as e:
-                self.root.after(0, lambda: messagebox.showerror(
-                    "Error",
-                    f"Error durante la configuración de sesión: {e}"
-                ))
+                self.root.after(0, lambda: self._cleanup_session_after_setup(False, str(e)))
 
         setup_thread = threading.Thread(target=setup_in_background, daemon=True)
         setup_thread.start()
 
-        messagebox.showinfo(
-            "Configuración en Progreso",
-            "Se está abriendo Chromium...\n\n"
-            "1. Inicia sesión con tus credenciales\n"
-            "2. Navega a tu bandeja de entrada\n"
-            "3. Vuelve a esta ventana y presiona ENTER en la terminal\n"
-            "4. La sesión se guardará automáticamente"
+        # Show confirmation window with "Sesión Lista" button
+        self._show_session_confirm_dialog()
+
+    def _show_session_confirm_dialog(self):
+        """Show a dialog with 'Sesión Lista' button for manual confirmation."""
+        import tkinter as tk
+        from tkinter import ttk
+        
+        # Create a new top-level window
+        confirm_win = tk.Toplevel(self.root)
+        confirm_win.title("Configurando Sesión...")
+        confirm_win.geometry("350x200")
+        confirm_win.resizable(False, False)
+        confirm_win.transient(self.root)
+        confirm_win.grab_set()
+        
+        # Store reference for cleanup (before any scheduling)
+        self._session_confirm_window = confirm_win
+        self._session_confirm_closing = False
+        
+        # Center the window using after to avoid update_idletasks issues on macOS
+        def _position_window():
+            try:
+                if confirm_win.winfo_exists():
+                    sw = confirm_win.winfo_screenwidth()
+                    sh = confirm_win.winfo_screenheight()
+                    x = (sw // 2) - (350 // 2)
+                    y = (sh // 2) - (200 // 2)
+                    confirm_win.geometry(f"350x200+{x}+{y}")
+            except tk.TclError:
+                pass
+        self.root.after(50, _position_window)
+        
+        # Instructions
+        instructions = ttk.Label(
+            confirm_win,
+            text="1. Inicia sesión en el navegador\n"
+                 "2. Espera a que cargue tu bandeja\n"
+                 "3. Haz clic en 'Sesión Lista'",
+            justify='left',
+            font=('TkDefaultFont', 10)
         )
+        instructions.pack(padx=20, pady=(20, 10), anchor='w')
+        
+        # Status label
+        self._confirm_status = ttk.Label(
+            confirm_win,
+            text="⏳ Esperando...",
+            foreground='gray'
+        )
+        self._confirm_status.pack(pady=5)
+        
+        # Confirm button
+        confirm_btn = ttk.Button(
+            confirm_win,
+            text="✅ Sesión Lista",
+            command=self._on_session_confirmed,
+            style='Accent.TButton'
+        )
+        confirm_btn.pack(pady=10, ipadx=20, ipady=5)
+        
+        # Make window closeable
+        confirm_win.protocol("WM_DELETE_WINDOW", lambda: self._on_session_confirm_closed())
+    
+    def _on_session_confirmed(self):
+        """Handle 'Sesión Lista' button click."""
+        if self._session_confirm_closing:
+            return
+        try:
+            self.service.confirm_session_ready()
+            if self._confirm_status and self._confirm_status.winfo_exists():
+                self._confirm_status.config(text="✅ Sesión confirmada, guardando...", foreground='green')
+            # Close the confirm window after a short delay
+            self.root.after(1500, lambda: self._close_session_confirm())
+        except Exception as e:
+            logger.error(f"Error confirming session: {e}")
+    
+    def _on_session_confirm_closed(self):
+        """Handle confirm window close button."""
+        self._close_session_confirm()
+    
+    def _close_session_confirm(self):
+        """Close the session confirmation window safely."""
+        if self._session_confirm_closing:
+            return
+        self._session_confirm_closing = True
+        if self._session_confirm_window:
+            try:
+                if self._session_confirm_window.winfo_exists():
+                    self._session_confirm_window.grab_release()
+            except tk.TclError:
+                pass
+            try:
+                if self._session_confirm_window.winfo_exists():
+                    self._session_confirm_window.destroy()
+            except tk.TclError:
+                pass
+            self._session_confirm_window = None
+        self._confirm_status = None
+    
+    def _cleanup_session_after_setup(self, success: bool, error_msg: str = ""):
+        """Clean up after session setup completes (always runs on main thread)."""
+        self._close_session_confirm()
+        
+        if success:
+            messagebox.showinfo(
+                "Éxito",
+                "Sesión configurada correctamente.\n\n"
+                "La sesión ha sido guardada en state.json"
+            )
+        elif error_msg:
+            messagebox.showerror(
+                "Error",
+                f"Error durante la configuración de sesión: {error_msg}"
+            )
+        else:
+            messagebox.showwarning(
+                "Sesión No Detectada",
+                "No se pudo detectar la sesión automáticamente.\n\n"
+                "Si ya iniciaste sesión, vuelve a intentar.\n"
+                "Si no pudiste acceder, verifica tus credenciales."
+            )
+        
+        self._check_session_status()
 
     def _delete_session(self):
         """Delete browser session."""
@@ -2063,6 +2173,24 @@ Resultados guardados en: {self.excel_path_var.get()}"""
         self.root.bind('<Escape>', lambda e: self._stop_processing() if self.is_processing else None)
         self.root.bind('<Control-s>', lambda e: self._save_config())
         self.root.bind('<Control-Shift-Return>', lambda e: self._start_scraper())
+
+    def _setup_safe_close(self):
+        """Setup safe window close handler to prevent Tkinter crashes on macOS."""
+        self.root.protocol("WM_DELETE_WINDOW", self._safe_close)
+
+    def _safe_close(self):
+        """Safely close the application, cleaning up all windows."""
+        # Close session confirm window first if it exists
+        self._close_session_confirm()
+        # Then quit and destroy main window
+        try:
+            self.root.quit()
+        except tk.TclError:
+            pass
+        try:
+            self.root.destroy()
+        except tk.TclError:
+            pass
 
     def _validate_numeric(self, value_if_allowed):
         """Validate numeric input for Entry/Spinbox."""

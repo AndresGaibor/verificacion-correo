@@ -52,6 +52,10 @@ class GUIService:
             logger.error(f"Session setup error: {e}")
             return False
 
+    def confirm_session_ready(self):
+        """Signal that the user has confirmed the session is ready to save."""
+        self.session_manager.confirm_session_ready()
+
     def get_excel_summary(self, excel_path: str) -> Dict[str, Any]:
         """Get Excel file summary."""
         try:

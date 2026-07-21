@@ -6,6 +6,7 @@ for automated interaction with the OWA interface.
 """
 
 import os
+import threading
 from pathlib import Path
 from typing import Optional, Dict, Any
 from playwright.sync_api import sync_playwright, Browser, BrowserContext, Page, Playwright
@@ -37,12 +38,23 @@ class SessionManager:
         self._playwright: Optional[Playwright] = None
         self._browser: Optional[Browser] = None
         self._context: Optional[BrowserContext] = None
+        self._session_confirmed: Optional[threading.Event] = None
 
-    def setup_interactive_session(self) -> bool:
+    def confirm_session_ready(self):
+        """Signal that the user has confirmed the session is ready to save."""
+        if self._session_confirmed:
+            self._session_confirmed.set()
+            logger.info("Session confirmed by user")
+
+    def setup_interactive_session(self, timeout_minutes: int = 5) -> bool:
         """
         Set up an interactive session for manual authentication.
 
         Opens a browser window for manual login and saves the session state.
+        Supports both automatic URL detection and manual confirmation.
+
+        Args:
+            timeout_minutes: Maximum minutes to wait for authentication (default: 5)
 
         Returns:
             True if session was successfully saved, False otherwise
@@ -52,7 +64,6 @@ class SessionManager:
 
         # Thread safety hacks for Playwright in background thread
         import asyncio
-        import threading
         
         # Strategy 1: Set environment variable to force sync API
         os.environ['PLAYWRIGHT_PYTHON_SYNC_API_IN_THREAD'] = '1'
@@ -66,25 +77,27 @@ class SessionManager:
             # No event loop in current thread
             pass
 
+        # Create event for manual confirmation
+        self._session_confirmed = threading.Event()
+
         try:
             with sync_playwright() as p:
                 # Launch browser (visible for manual interaction)
                 try:
                     browser = p.chromium.launch(
                         headless=False,
-                        slow_mo=1000  # Slow down operations to give user time to interact
+                        slow_mo=1000
                     )
                 except Exception as e:
                     # Check if error is due to missing browser executable
                     error_str = str(e)
                     if "Executable doesn't exist" in error_str or "playwright install" in error_str.lower():
                         logger.warning("Playwright browsers not installed, attempting auto-installation...")
-                        print("\n⚠️ Navegadores de Playwright no encontrados.")
+                        print("\n⚠️  Navegadores de Playwright no encontrados.")
                         
                         # Try to install browsers
                         from verificacion_correo.core.first_run import install_playwright_browsers
                         if install_playwright_browsers():
-                            # Retry browser launch after installation
                             logger.info("Retrying browser launch after installation...")
                             print("🔄 Reintentando abrir navegador...")
                             browser = p.chromium.launch(
@@ -112,45 +125,95 @@ class SessionManager:
                     logger.info("Credentials found, attempting auto-login...")
                     self._try_auto_login_adfs(page)
 
-                logger.info("Waiting for authentication... (timeout: 3 minutes)")
+                timeout_seconds = timeout_minutes * 60
+                logger.info(f"Waiting for authentication... (timeout: {timeout_minutes} minutes)")
+                print(f"\n🔑 Sesión de navegador abierta.")
+                print(f"   1. Inicia sesión en OWA")
+                print(f"   2. Espera a que cargue tu bandeja de entrada")
+                print(f"   3. Haz clic en 'Sesión Lista' en la aplicación")
+                print(f"   Timeout: {timeout_minutes} minutos\n")
 
                 # Detection loop for successful authentication
                 import time as time_module
                 start_time = time_module.time()
-                TIMEOUT = 180  # 3 minutes
                 CHECK_INTERVAL = 2  # seconds
                 auth_success = False
+                owa_detected = False
 
                 while True:
+                    # Check if user manually confirmed
+                    if self._session_confirmed.is_set():
+                        logger.info("Session confirmed by user via button")
+                        auth_success = True
+                        break
+
                     # Check if browser was closed by user
                     try:
                         if page.is_closed():
                             logger.info("Browser closed by user")
+                            # If we detected OWA before close, try to save
+                            if owa_detected:
+                                logger.info("OWA was detected before browser close, saving session...")
+                                auth_success = True
                             break
                     except Exception:
                         # Page might be in a bad state
                         break
 
-                    current_url = page.url.lower()
+                    try:
+                        current_url = page.url.lower()
 
-                    # Success: OWA page reached
-                    if 'correoweb.madrid.org/owa/' in current_url:
-                        logger.info("Authentication successful!")
-                        auth_success = True
-                        break
+                        # Flexible OWA detection - multiple patterns
+                        is_on_owa = (
+                            'correoweb.madrid.org' in current_url and
+                            ('owa' in current_url or 'mail' in current_url or 'inbox' in current_url)
+                        )
+
+                        # Also detect if we're past the ADFS login (any correoweb page)
+                        is_past_adfs = (
+                            'correoweb.madrid.org' in current_url and
+                            'adfs' not in current_url and
+                            'login' not in current_url and
+                            'signin' not in current_url
+                        )
+
+                        if is_on_owa or is_past_adfs:
+                            if not owa_detected:
+                                owa_detected = True
+                                logger.info(f"OWA detected at: {current_url}")
+                                print(f"✅ OWA detectado: {current_url[:80]}...")
+                            # Auto-confirm if we're clearly on OWA
+                            if is_on_owa:
+                                auth_success = True
+                                break
+                    except Exception as e:
+                        logger.debug(f"URL check error: {e}")
 
                     # Check timeout
-                    if time_module.time() - start_time >= TIMEOUT:
-                        logger.warning("Authentication timeout (3 minutes)")
+                    elapsed = time_module.time() - start_time
+                    remaining = timeout_seconds - elapsed
+                    if remaining <= 0:
+                        logger.warning(f"Authentication timeout ({timeout_minutes} minutes)")
+                        print(f"\n⏰ Timeout de {timeout_minutes} minutos alcanzado.")
                         break
+                    
+                    # Progress indicator every 30 seconds
+                    if int(elapsed) % 30 == 0 and int(elapsed) > 0:
+                        mins_left = int(remaining // 60)
+                        secs_left = int(remaining % 60)
+                        print(f"   ⏳ Esperando... ({mins_left}m {secs_left}s restantes)")
 
                     time_module.sleep(CHECK_INTERVAL)
 
-                # Save session state only if authentication was successful
+                # Save session state
                 if auth_success:
                     self._ensure_session_directory()
                     context.storage_state(path=str(self.session_file))
                     logger.info(f"Session saved to: {self.session_file}")
+                    print(f"\n💾 Sesión guardada en: {self.session_file}")
+                else:
+                    print(f"\n❌ No se detectó sesión válida.")
+                    print(f"   Asegúrate de haber iniciado sesión en OWA correctamente.")
 
                 context.close()
                 browser.close()
@@ -159,9 +222,12 @@ class SessionManager:
 
         except Exception as e:
             logger.error(f"Error setting up interactive session: {e}")
+            print(f"\n❌ Error: {e}")
             return False
             
         finally:
+            # Clean up event
+            self._session_confirmed = None
             # Restore event loop
             if old_loop is not None:
                 asyncio.set_event_loop(old_loop)

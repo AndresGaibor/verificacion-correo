@@ -111,7 +111,10 @@ class ConfigWizard:
 
         welcome_text = """
 Este asistente te guiará en la configuración inicial de la aplicación
-de Verificación de Correos OWA.
+de Verificación de Correos OWA de Madrid.
+
+La aplicación permite buscar contactos en el directorio de OWA (correoweb.madrid.org)
+y extraer información como nombre, teléfono, departamento y dirección.
 
 Configuraremos los siguientes aspectos:
 • Configuración básica de la aplicación
@@ -147,7 +150,7 @@ Al finalizar, tendrás la aplicación lista para usar.
         ttk.Entry(excel_entry_frame, textvariable=self.excel_path_var).pack(side='left', fill='x', expand=True, padx=(0, 5))
         ttk.Button(excel_entry_frame, text="Examinar", command=self._browse_excel_file).pack(side='right')
 
-        ttk.Label(excel_frame, text="El archivo debe tener correos en la columna A, starting from row 2",
+        ttk.Label(excel_frame, text="El archivo debe tener correos en la columna A, iniciando desde la fila 2",
                  font=('TkDefaultFont', 9)).pack(anchor='w', pady=(5, 0))
 
         # Batch size
@@ -197,7 +200,7 @@ Pasos para configurar la sesión:
         self.title_label.config(text="Configuración Completa")
 
         final_text = """
-¡Excelencial Has completado la configuración inicial.
+¡Excelente! Has completado la configuración inicial.
 
 Resumen de tu configuración:
 • URL de OWA: {}
@@ -243,14 +246,20 @@ La aplicación está lista para usar. Puedes:
         try:
             messagebox.showinfo(
                 "Configuración de Sesión",
-                "Se abrirá una ventana del navegador. Inicia sesión en OWA y luego cierra la ventana."
+                "Se abrirá una ventana del navegador.\n\n"
+                "1. Inicia sesión en OWA\n"
+                "2. Espera a que cargue tu bandeja\n"
+                "3. Haz clic en 'Sesión Lista' en la aplicación"
             )
 
             session_manager = SessionManager(self.config)
             if session_manager.setup_interactive_session():
                 messagebox.showinfo("Éxito", "Sesión configurada correctamente")
             else:
-                messagebox.showwarning("Advertencia", "No se pudo configurar la sesión automáticamente. Puedes hacerlo más tarde desde la aplicación.")
+                messagebox.showwarning("Advertencia", 
+                    "No se pudo detectar la sesión automáticamente.\n\n"
+                    "Si ya iniciaste sesión, puedes continuar.\n"
+                    "Si no pudiste acceder, verifica tus credenciales.")
         except Exception as e:
             messagebox.showerror("Error", f"Error al configurar sesión: {e}")
 

@@ -116,9 +116,7 @@ class FirstRunManager:
         """Ensure necessary directories exist."""
         directories = [
             Path("data"),
-            Path("logs"),
-            Path("sessions"),
-            Path("exports")
+            Path("data/gal"),
         ]
 
         for directory in directories:
@@ -156,11 +154,10 @@ class FirstRunManager:
             ws = wb.active
             ws.title = "Contactos"
 
-            # Headers
+            # Headers (columns A-J matching the real system)
             headers = [
-                "Correo", "Estado", "Nombre", "Email Personal", "Teléfono",
-                "Dirección", "Departamento", "Compañía", "Oficina", "SIP",
-                "Fecha Procesamiento", "Observaciones"
+                "Correo", "Status", "Nombre", "Email Personal", "Teléfono",
+                "SIP", "Dirección", "Departamento", "Compañía", "Oficina"
             ]
 
             for col_idx, header in enumerate(headers, start=1):

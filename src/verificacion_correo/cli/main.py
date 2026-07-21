@@ -310,15 +310,45 @@ Examples:
 
     def _cmd_setup(self, args):
         """Set up browser session command."""
+        import threading
+        
         print("=" * 50)
         print("BROWSER SESSION SETUP")
         print("=" * 50)
 
         print(f"🌐 Target URL: {self.config.page_url}")
         print(f"💾 Session file: {self.config.get_session_file_path()}")
+        print()
+        print("📋 Instrucciones:")
+        print("   1. Se abrirá el navegador")
+        print("   2. Inicia sesión en OWA")
+        print("   3. Espera a que cargue tu bandeja de entrada")
+        print("   4. Presiona ENTER aquí para guardar la sesión")
+        print()
 
-        success = setup_session_interactive(self.config)
-        if success:
+        # Create session manager for manual confirmation
+        from verificacion_correo.core.session import SessionManager
+        session_manager = SessionManager(self.config)
+        
+        # Start session setup in background thread
+        def setup_thread():
+            session_manager.setup_interactive_session()
+        
+        thread = threading.Thread(target=setup_thread, daemon=True)
+        thread.start()
+        
+        # Wait for user to press ENTER
+        try:
+            input("⏳ Presiona ENTER cuando hayas iniciado sesión... ")
+            session_manager.confirm_session_ready()
+        except (KeyboardInterrupt, EOFError):
+            print("\n⚠️  Cancelado por el usuario")
+            return 1
+        
+        # Wait for thread to finish
+        thread.join(timeout=30)
+        
+        if session_manager.session_file.exists():
             print("\n✅ Session setup completed successfully")
             print("   You can now run 'verificacion-correo' to process emails")
             return 0
